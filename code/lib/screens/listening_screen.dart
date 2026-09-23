@@ -28,6 +28,9 @@ import '../widgets/speed_selector.dart';
 import '../widgets/subtitle_mode_selector.dart';
 import '../widgets/video_area.dart';
 import 'dictation_screen.dart';
+import '../data/vocabulary_store.dart';
+import '../models/subtitle_token.dart';
+import '../models/vocabulary_model.dart';
 
 /// The listening screen (Visual Polish V1/V2).
 ///
@@ -60,10 +63,16 @@ class ListeningScreen extends StatefulWidget {
     this.videoSource,
     this.onControllerCreated,
     this.aiGovernorService,
+    this.vocabularyStore,
   });
 
   /// Optional AI Governor service (injected by caller or tests).
   final AiGovernorService? aiGovernorService;
+
+  /// Optional vocabulary store (injected by caller or tests).
+  ///
+  /// 生词本两层模型（Item / Occurrence）。见 10 号设计文档 §十三。
+  final VocabularyStore? vocabularyStore;
 
   /// Overrides the production [JustAudioFacade] (used by tests).
   final AudioPlayerFacade? audioFacade;
@@ -156,6 +165,117 @@ class ListeningScreenState extends State<ListeningScreen>
   int _transcriptVisibleIndex = 0;
   late final AiGovernorService _aiGovernorService =
       widget.aiGovernorService ?? AiGovernorService();
+
+  /// 生词本：核心是「听」，所以积累模式默认关闭，入口在二级菜单里的三级开关。
+  late final VocabularyStore _vocabularyStore =
+      widget.vocabularyStore ?? VocabularyStore();
+
+  /// 生词积累模式是否开启（三级开关）。
+  bool _accumulationMode = false;
+
+  /// 点词保存 / 再点取消 —— 返回 true 表示当前为「已保存」。
+  ///
+  /// 判重交给 VocabularyStore：Item 层按归一化词形跨课程合并，
+  /// Occurrence 层按 (lesson, sentence, 字符区间) 判重，
+  /// 所以同一句里的多个词**不会互相覆盖**（现状 AnkiCard 按句判重会覆盖）。
+  bool _toggleWord(SubtitleToken token) {
+    final sentence = _controller.currentSentence;
+    return _vocabularyStore.toggleOccurrence(
+      surface: token.surface,
+      kind: VocabularyKind.word,
+      lessonId: widget.lessonId ?? 'demo',
+      lessonTitle: widget.title ?? '精听课程',
+      sentenceId: sentence.id,
+      sentenceIndex: sentence.index,
+      sentenceText: sentence.english,
+      startMs: sentence.startMs,
+      endMs: sentence.endMs,
+      audioPath: widget.audioAsset ?? '',
+      charStart: token.charStart,
+      charEnd: token.charEnd,
+    );
+  }
+
+  /// 点词后的反馈：**只给轻提示与撤销，不弹释义、不暂停音频**。
+  ///
+  /// 「存」与「查」必须分开：立刻弹释义会把注意力从声音时间轴拉走，
+  /// 等于把主任务从「听」切成「读」（见 10 号文档 §四）。
+  void _onTokenTap(SubtitleToken token) {
+    final saved = _toggleWord(token);
+    setState(() {});
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        duration: const Duration(milliseconds: 1500),
+        content: Text('${saved ? '✓ 已存' : '↩ 已取消'}  ${token.surface}'),
+        action: SnackBarAction(
+          label: LLStrings.of(context).cancel,
+          onPressed: () {
+            _toggleWord(token);
+            setState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
+  /// 二级菜单（精听页 ⋯）—— 三级开关都收在这里。
+  Future<void> _openMoreMenu() async {
+    final s = LLStrings.of(context);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.ll.bg,
+      builder: (sheetContext) {
+        final ll = sheetContext.ll;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.more,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: ll.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                SwitchListTile(
+                  key: const Key('accumulation-toggle'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _accumulationMode,
+                  activeThumbColor: ll.textPrimary,
+                  onChanged: (value) {
+                    Navigator.of(sheetContext).pop();
+                    setState(() => _accumulationMode = value);
+                  },
+                  title: Text(
+                    s.vocabAccumulation,
+                    style: TextStyle(fontSize: 14, color: ll.textPrimary),
+                  ),
+                  subtitle: Text(
+                    s.vocabAccumulationHint,
+                    style: TextStyle(fontSize: 11.5, color: ll.textTertiary),
+                  ),
+                ),
+                Divider(color: ll.divider, height: 24),
+                Text(
+                  s.vocabCandidateCount(_vocabularyStore.itemCount),
+                  style: TextStyle(fontSize: 11.5, color: ll.textTertiary),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   /// 核心层 P1：打开听写训练（句级录入 / 段级集中批改）。
   ///
@@ -328,6 +448,7 @@ class ListeningScreenState extends State<ListeningScreen>
 
   @override
   void dispose() {
+    if (widget.vocabularyStore == null) _vocabularyStore.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _leftLongPressTimer?.cancel();
     _scrubberHideTimer?.cancel();
@@ -608,6 +729,17 @@ class ListeningScreenState extends State<ListeningScreen>
                               showEnglish: _subtitleMode.showsEnglish,
                               showChinese: _subtitleMode.showsChinese,
                               styles: learning,
+                              // 只在一级精听页、且用户主动开启积累模式后
+                              // 字幕才变成可点 —— 平时不允许把词变成按钮。
+                              accumulationMode: _accumulationMode,
+                              onTokenTap: _onTokenTap,
+                              isTokenSaved: (start, end) =>
+                                  _vocabularyStore.isSaved(
+                                    lessonId: widget.lessonId ?? 'demo',
+                                    sentenceId: controller.currentSentence.id,
+                                    charStart: start,
+                                    charEnd: end,
+                                  ),
                             ),
                           ),
                         ),
@@ -727,7 +859,7 @@ class ListeningScreenState extends State<ListeningScreen>
                   ),
                   // 右侧现在有两个图标（听写 + 显示模式），左右槽位成对加宽，
                   // 否则计数器会偏心且 RenderFlex 溢出。
-                  slotWidth: 96,
+                  slotWidth: 144,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -739,6 +871,15 @@ class ListeningScreenState extends State<ListeningScreen>
                         icon: const Icon(Icons.keyboard_alt_outlined, size: 19),
                         color: ll.textSecondary,
                         onPressed: _openDictation,
+                      ),
+                      // 二级菜单：三级开关（生词积累）都收在这里，
+                      // 不与核心操作抢顶栏位置。
+                      IconButton(
+                        key: const Key('more-button'),
+                        tooltip: LLStrings.of(context).more,
+                        icon: const Icon(Icons.more_horiz_rounded, size: 20),
+                        color: ll.textSecondary,
+                        onPressed: _openMoreMenu,
                       ),
                       IconButton(
                     key: const Key('view-mode-button'),

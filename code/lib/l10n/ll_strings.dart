@@ -23,6 +23,20 @@ class LLStrings {
   /// 界面语言判定（供新页面复用，避免各自硬编码中英判断）。
   bool get isZh => _isZh;
 
+  // -------------------------------------------------------------- vocab ----
+  // 生词本（附属层）：入口开在三级。文案遵循 10 号文档红线 ——
+  // 点词只「存」不「查」；释义必须由用户第二个主动动作打开。
+  String get more => _isZh ? '更多' : 'More';
+  String get vocabAccumulation => _isZh ? '生词积累模式' : 'Vocabulary mode';
+  String get vocabAccumulationHint => _isZh
+      ? '开启后字幕逐词可点：点一下存入候选，再点取消。不暂停、不弹释义'
+      : 'Tap words to collect them; tap again to remove. Playback never stops';
+  String get vocabSaved => _isZh ? '已存' : 'Saved';
+  String get vocabRemoved => _isZh ? '已取消' : 'Removed';
+
+  String vocabCandidateCount(int count) =>
+      _isZh ? '候选池 $count 个词' : '$count candidates';
+
   // --------------------------------------------------------- dictation ----
   // 听写（核心层 P1）：句级录入、段级集中批改。文案遵循 08 定调——
   // 第二层原因只能写成「可能与…有关」，不得渲染成确定结论。
