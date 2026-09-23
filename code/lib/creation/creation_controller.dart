@@ -47,11 +47,15 @@ class CreationController extends ChangeNotifier {
     Future<Directory> Function()? tempDirResolver,
     Future<int> Function()? freeDiskSpaceResolver,
     String Function()? youtubeRelayBaseUrlResolver,
+    YouTubeRelayClient Function(String baseUrl)? youtubeRelayFactory,
   }) : tempDirResolver = tempDirResolver ?? _defaultTempDirResolver,
        freeDiskSpaceResolver = freeDiskSpaceResolver ?? _defaultFreeDiskSpace,
        youtubeRelayBaseUrlResolver =
            youtubeRelayBaseUrlResolver ??
-           (() => YouTubeRelayClient.defaultBaseUrl);
+           (() => YouTubeRelayClient.defaultBaseUrl),
+       _youtubeRelayFactory =
+           youtubeRelayFactory ??
+           ((baseUrl) => YouTubeRelayClient(baseUrl: baseUrl));
 
   final LessonRepository repository;
   final AudioPreprocessor audioPreprocessor;
@@ -66,6 +70,10 @@ class CreationController extends ChangeNotifier {
 
   /// Resolves the PC-side YouTube relay base URL (e.g. from AppPreferences).
   final String Function() youtubeRelayBaseUrlResolver;
+
+  /// Builds the relay client — a seam so tests can simulate an unreachable or
+  /// healthy relay without a real PC.
+  final YouTubeRelayClient Function(String baseUrl) _youtubeRelayFactory;
 
   static Future<Directory> _defaultTempDirResolver() => getTemporaryDirectory();
 
@@ -230,10 +238,19 @@ class CreationController extends ChangeNotifier {
             // traffic exiting through the phone's VPN (the PC-IP blacklist
             // does not apply to the phone's exit). Audio only — a YouTube
             // video picture needs an iframe harness and arrives later.
-            final relay = YouTubeRelayClient(
-              baseUrl: youtubeRelayBaseUrlResolver(),
-            );
+            final relayBaseUrl = youtubeRelayBaseUrlResolver();
+            final relay = _youtubeRelayFactory(relayBaseUrl);
             final ytUrl = extractUrl(input.source ?? '') ?? input.source!;
+
+            // 先探活再开工：中继不在线时**立刻**失败，不要等 ASR/翻译
+            // 跑到一半才发现拿不到音频。用户拿到的是"该去做什么"，
+            // 而不是一段跑了几十秒后的含糊错误。
+            if (!await relay.checkHealth()) {
+              throw CreationException(
+                CreationError.sourceUnavailable,
+                'youtube relay unreachable at $relayBaseUrl',
+              );
+            }
             final ytId = _extractYouTubeId(ytUrl);
             if (ytId != null && ytId.isNotEmpty) {
               videoSource = VideoSource(
@@ -288,9 +305,11 @@ class CreationController extends ChangeNotifier {
         } on BilibiliException catch (error) {
           throw CreationException(CreationError.inputError, error.message);
         } on YouTubeRelayException catch (error) {
+          // 链接是好的，坏的是取源通道 —— 归类为 sourceUnavailable，
+          // 文案由界面给出「插线 / 启中继 / 换 B 站」三步（见 l10n）。
           throw CreationException(
-            CreationError.inputError,
-            'YouTube 中继: ${error.message}（确认 PC 中继已启动且 USB 已连接）',
+            CreationError.sourceUnavailable,
+            'youtube relay: ${error.message}',
           );
         }
         await _checkCancel();

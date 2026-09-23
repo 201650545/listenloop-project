@@ -489,6 +489,23 @@ class LLStrings {
           : 'Talks to Xiaomi MiMo (mimo-v2.6-flash) directly — no PC, no adb reverse — and falls back across MiMo tiers on failure. Translation shares the same model.';
 
   // --------------------------------------------------------- creation ----
+  /// 取源失败时的操作清单。**必须可照着做**，不要写"请重试"这种废话。
+  /// 取源失败时的操作清单。**必须可照着做**，不要写"请重试"这种废话。
+  ///
+  /// 三步顺序有讲究：先给最可能奏效的动作（启动中继），再给前提（USB ——
+  /// PC 是借手机的代理出口访问 YouTube 的），最后给一条**完全不需要电脑的
+  /// 替代路径**（B 站链接）：保证用户永远有路可走。
+  String get creationRelayChecklist => _isZh
+      ? '① 电脑上双击 tool\\start_youtube_relay.ps1 —— 它会检查 yt-dlp、\n'
+            '     映射 8793/7892 并启动中继，最后自检一次\n'
+            '② 手机保持 USB 连接：PC 是借手机的代理出口访问 YouTube 的\n'
+            '③ 或者改用 B 站链接 —— 它完全不需要电脑'
+      : '1. On the PC, run tool\\start_youtube_relay.ps1 (checks yt-dlp, maps 8793/7892, starts the relay)\n'
+            '2. Keep the phone on USB — the PC borrows its proxy exit to reach YouTube\n'
+            '3. Or paste a Bilibili link instead: it needs no PC';
+
+  String get creationFailureDetail => _isZh ? '技术细节' : 'Technical detail';
+
   String get createLesson => _isZh ? '制作课程' : 'Create Lesson';
   String get creationMenuImport => _isZh ? '导入课程' : 'Import Lesson';
   String get creationMenuFromFile => _isZh ? '从本地文件创建' : 'Create from File';
@@ -519,6 +536,9 @@ class LLStrings {
 
   String errorMessage(CreationError code) => switch (code) {
     CreationError.inputError => _isZh ? '输入无效。' : 'Invalid input.',
+    CreationError.sourceUnavailable => _isZh
+        ? '取源通道不可用 —— 链接没有问题，是拿不到音频。'
+        : 'Source channel unavailable — the link is fine, the audio is not reachable.',
     CreationError.mediaError =>
       _isZh ? '无法处理该媒体文件。' : 'Could not process this media file.',
     CreationError.asrError => _isZh ? '转写失败。' : 'Transcription failed.',

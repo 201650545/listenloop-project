@@ -11,6 +11,7 @@ import '../theme/listenloop_theme.dart';
 import '../widgets/ll_brand.dart';
 import 'bilibili_source.dart';
 import 'creation_controller.dart';
+import 'creation_errors.dart';
 import 'lesson_input.dart';
 import 'lesson_job_stage.dart';
 
@@ -477,9 +478,44 @@ class _CreationFailed extends StatelessWidget {
               controller.errorCode == null
                   ? (controller.errorMessage ?? '')
                   : s.errorMessage(controller.errorCode!),
+              key: const Key('creation-failure-message'),
               style: LLText.body.copyWith(color: ll.textSecondary),
               textAlign: TextAlign.center,
             ),
+            // 取源通道不可用 = 用户没做错任何事，必须给他**能照着做**的步骤，
+            // 而不是一句"失败请重试"。
+            if (controller.errorCode == CreationError.sourceUnavailable) ...[
+              const SizedBox(height: LLSpacing.lg),
+              Container(
+                key: const Key('creation-failure-checklist'),
+                width: double.infinity,
+                padding: const EdgeInsets.all(LLSpacing.lg),
+                decoration: BoxDecoration(
+                  color: ll.surface,
+                  borderRadius: BorderRadius.circular(LLRadius.small),
+                  border: Border.all(color: ll.divider),
+                ),
+                child: Text(
+                  s.creationRelayChecklist,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.7,
+                    color: ll.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+            // 技术细节不能被丢掉：以前这里只显示通用文案，用户只看到
+            // 「输入无效」却无从下手（2026-09-23 用户反馈的实际症状）。
+            if ((controller.errorMessage ?? '').isNotEmpty) ...[
+              const SizedBox(height: LLSpacing.lg),
+              Text(
+                '${s.creationFailureDetail} · ${controller.errorMessage}',
+                key: const Key('creation-failure-detail'),
+                style: LLText.caption.copyWith(color: ll.textTertiary),
+                textAlign: TextAlign.center,
+              ),
+            ],
             const SizedBox(height: LLSpacing.xxl),
             Row(
               children: [
