@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/vocabulary_model.dart';
 
@@ -16,8 +19,17 @@ import '../models/vocabulary_model.dart';
 /// 本存储不复用那套逻辑。
 ///
 /// 全内存 + JSON 序列化，**不依赖网络与 AI**。
+///
+/// 持久化走 `SharedPreferences`（与 `AiGovernorService` 的弱点/Anki 卡同一套打法）：
+/// 调 [load] 装载一次，之后的每次变更自动落盘。订阅者（精听页 / 生词本页）
+/// 应当共用**同一个实例**，否则两边会各存一份。
 class VocabularyStore extends ChangeNotifier {
-  VocabularyStore({List<VocabularyItem>? initial}) {
+  VocabularyStore({
+    List<VocabularyItem>? initial,
+    bool persist = true,
+    SharedPreferences? preferences,
+  }) : _autoPersist = persist,
+       _prefs = preferences {
     if (initial != null) {
       for (final item in initial) {
         _items[item.id] = item;
@@ -26,9 +38,78 @@ class VocabularyStore extends ChangeNotifier {
     _reindexCounters();
   }
 
+  /// 落盘键 —— 与 `listenloop:` 前缀的既有偏好保持一致。
+  static const String storageKey = 'listenloop:vocab_items';
+
   final Map<String, VocabularyItem> _items = <String, VocabularyItem>{};
   int _itemSeq = 0;
   int _occurrenceSeq = 0;
+
+  final bool _autoPersist;
+  SharedPreferences? _prefs;
+  bool _loaded = false;
+
+  /// 写盘串行化，避免并发写产生交错覆盖。
+  Future<void> _writeChain = Future<void>.value();
+
+  /// 从磁盘装载 —— **幂等**，重复调用只生效一次。
+  ///
+  /// 不做磁盘 IO 失败即抛：测试环境没有插件实现时静默降级为纯内存。
+  Future<void> load() async {
+    if (_loaded) return;
+    _loaded = true;
+    try {
+      final sp = _prefs ?? await SharedPreferences.getInstance();
+      _prefs = sp;
+      final raw = sp.getStringList(storageKey) ?? const <String>[];
+      if (raw.isEmpty) return;
+      var changed = false;
+      for (final entry in raw) {
+        try {
+          final item = VocabularyItem.fromJson(
+            (jsonDecode(entry) as Map).cast<String, Object?>(),
+          );
+          _items[item.id] = item;
+          changed = true;
+        } catch (e) {
+          debugPrint('[VocabularyStore] skip malformed item: $e');
+        }
+      }
+      if (!changed) return;
+      _reindexCounters();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[VocabularyStore] load failed (memory-only): $e');
+    }
+  }
+
+  void _schedulePersist() {
+    if (!_autoPersist) return;
+    _writeChain = _writeChain.then((_) => _persist()).catchError((Object e) {
+      debugPrint('[VocabularyStore] persist failed: $e');
+    });
+  }
+
+  Future<void> _persist() async {
+    try {
+      final sp = _prefs ?? await SharedPreferences.getInstance();
+      _prefs = sp;
+      final payload = <String>[
+        for (final item in _items.values) jsonEncode(item.toJson()),
+      ];
+      await sp.setStringList(storageKey, payload);
+    } catch (e) {
+      debugPrint('[VocabularyStore] persist failed (memory-only): $e');
+    }
+  }
+
+  /// 立即把当前状态写盘 —— 供测试与"退出前"场景使用。
+  Future<void> flush() => _schedulePersistAndWait();
+
+  Future<void> _schedulePersistAndWait() {
+    _schedulePersist();
+    return _writeChain;
+  }
 
   /// 全部词条，按最近见到倒序。
   List<VocabularyItem> get items {
@@ -45,6 +126,22 @@ class VocabularyStore extends ChangeNotifier {
 
   int get learningCount =>
       _items.values.where((i) => i.status == VocabularyStatus.learning).length;
+
+  int get knownCount =>
+      _items.values.where((i) => i.status == VocabularyStatus.known).length;
+
+  int get ignoredCount =>
+      _items.values.where((i) => i.status == VocabularyStatus.ignored).length;
+
+  /// 按状态取词条（null 表示「全部」），保持最近见到倒序。
+  List<VocabularyItem> byStatus(VocabularyStatus? status) => status == null
+      ? items
+      : List<VocabularyItem>.unmodifiable(
+          items.where((i) => i.status == status),
+        );
+
+  /// 是否已有该词的词条（跨课程合并的口径）。
+  bool containsSurface(String surface) => itemBySurface(surface) != null;
 
   VocabularyItem? itemById(String id) => _items[id];
 
@@ -108,6 +205,7 @@ class VocabularyStore extends ChangeNotifier {
     if (existing != null) {
       _items[item.id] = item; // 首次调用时把新建的词条落库
       notifyListeners();
+      _schedulePersist();
       return item;
     }
 
@@ -140,6 +238,7 @@ class VocabularyStore extends ChangeNotifier {
     );
     _items[item.id] = item;
     notifyListeners();
+    _schedulePersist();
     return item;
   }
 
@@ -198,6 +297,7 @@ class VocabularyStore extends ChangeNotifier {
       _items[itemId] = item.copyWith(occurrences: rest, lastSeenAt: DateTime.now());
     }
     notifyListeners();
+    _schedulePersist();
   }
 
   /// 显式转移学习状态（派生规则 1：状态不随单次证据自动升降）。
@@ -206,6 +306,7 @@ class VocabularyStore extends ChangeNotifier {
     if (item == null || item.status == status) return;
     _items[itemId] = item.withStatus(status);
     notifyListeners();
+    _schedulePersist();
   }
 
   /// 把候选词升入正式学习队列（用户主动确认）。
@@ -220,6 +321,7 @@ class VocabularyStore extends ChangeNotifier {
     _itemSeq = 0;
     _occurrenceSeq = 0;
     notifyListeners();
+    _schedulePersist();
   }
 
   // ------------------------------------------------------------ 序列化

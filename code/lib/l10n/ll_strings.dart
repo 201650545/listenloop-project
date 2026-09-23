@@ -37,6 +37,109 @@ class LLStrings {
   String vocabCandidateCount(int count) =>
       _isZh ? '候选池 $count 个词' : '$count candidates';
 
+  // 生词本管理页（Library 二级）。枚举一律走 key 映射 —— l10n 不依赖模型层。
+  String get vocabBook => _isZh ? '生词本' : 'Vocabulary';
+  String get vocabTodayPlan => _isZh ? '今日计划' : "Today's plan";
+  String get vocabAll => _isZh ? '全部' : 'All';
+  String get vocabEmpty => _isZh
+      ? '还没有生词。在精听页「更多」里开生词积累模式，点字幕里的词即可保存。'
+      : 'Nothing saved yet. Turn on Vocabulary mode under More in the listening page, then tap words.';
+  String get vocabNoItemsForFilter => _isZh ? '这一栏还是空的' : 'Nothing in this filter yet';
+  String get vocabTodayPlanEmpty => _isZh
+      ? '今天没有需要练的词 —— 只有出现听写错误、或已到复习期的词才会进入计划'
+      : 'Nothing to drill today — only words with dictation evidence or a due review enter the plan';
+  String get vocabEvidence => _isZh ? '上下文证据' : 'Evidence';
+  String get vocabReason => _isZh ? '依据' : 'Why';
+  String get vocabSuggest => _isZh ? '建议' : 'Suggested';
+  String get vocabOpenOriginal => _isZh ? '回原声' : 'Play original';
+  String get vocabLessonMissing =>
+      _isZh ? '这门课程已不在本机' : 'That lesson is no longer on this device';
+  String get vocabStartLearning => _isZh ? '加入学习' : 'Start learning';
+  String get vocabMarkKnown => _isZh ? '标记已掌握' : 'Mark known';
+  String get vocabIgnore => _isZh ? '忽略' : 'Ignore';
+  String get vocabDelete => _isZh ? '删除词条' : 'Delete';
+  String get vocabRestore => _isZh ? '移回候选池' : 'Back to candidates';
+
+  /// 汇总条：三个数字一次说清。
+  String vocabSummary(int candidates, int learning, int known) => _isZh
+      ? '候选 $candidates · 学习中 $learning · 已掌握 $known'
+      : '$candidates candidates · $learning learning · $known known';
+
+  String vocabSeenTimes(int count) =>
+      _isZh ? '遇到 $count 次' : 'seen $count×';
+
+  String vocabSentenceAt(String lesson, int index) =>
+      _isZh ? '$lesson · 第 $index 句' : '$lesson · sentence $index';
+
+  String vocabStatusLabel(String key) {
+    switch (key) {
+      case 'candidate':
+        return _isZh ? '候选池' : 'Candidates';
+      case 'learning':
+        return _isZh ? '学习中' : 'Learning';
+      case 'known':
+        return _isZh ? '已掌握' : 'Known';
+      case 'ignored':
+        return _isZh ? '已忽略' : 'Ignored';
+      default:
+        return '';
+    }
+  }
+
+  String vocabSourceLabel(String key) {
+    switch (key) {
+      case 'tap':
+        return _isZh ? '点存' : 'tapped';
+      case 'dictation':
+        return _isZh ? '听写' : 'dictation';
+      case 'ai':
+        return _isZh ? 'AI' : 'AI';
+      default:
+        return '';
+    }
+  }
+
+  /// 学习组件名（v1 白名单）。
+  String planComponentLabel(String key) {
+    switch (key) {
+      case 'originalRelisten':
+        return _isZh ? '回原声' : 'Relisten';
+      case 'dictationRetry':
+        return _isZh ? '重听写' : 'Dictate again';
+      case 'clozeRecall':
+        return _isZh ? 'Cloze 回忆' : 'Cloze recall';
+      case 'morphologyNote':
+        return _isZh ? '形态纠错' : 'Word form';
+      case 'srsReview':
+        return _isZh ? 'SRS 复习' : 'SRS review';
+      default:
+        return '';
+    }
+  }
+
+  /// 计划原因 —— 每条建议都必须说得出依据（验收标准 2）。
+  String planReasonLabel(String key) {
+    switch (key) {
+      case 'reliableHearing':
+        return _isZh ? '听写漏词/替换' : 'missed or swapped in dictation';
+      case 'extraOnly':
+        return _isZh ? '听写多写了原文没有的词' : 'wrote words that were not there';
+      case 'spellingOnly':
+        return _isZh ? '只是拼写，不代表没听清' : 'spelling only — hearing is fine';
+      case 'morphologyOnly':
+        return _isZh ? '词尾形态没听出' : 'word form missed';
+      case 'uncertainOnly':
+        return _isZh ? '听写对齐不可靠，只回原声' : 'dictation alignment unreliable — relisten only';
+      case 'tapOnly':
+        return _isZh ? '仅手动收藏，先留在候选池' : 'saved by hand only — stays in candidates';
+      case 'knownDue':
+        return _isZh ? '已掌握且到了复习期' : 'known and due for review';
+      default:
+        return '';
+    }
+  }
+
+
   // --------------------------------------------------------- dictation ----
   // 听写（核心层 P1）：句级录入、段级集中批改。文案遵循 08 定调——
   // 第二层原因只能写成「可能与…有关」，不得渲染成确定结论。
@@ -63,6 +166,8 @@ class LLStrings {
       : 'Alignment unreliable — overall result only';
   String get dictationYourAnswer => _isZh ? '你的答案' : 'Your answer';
   String get dictationExpected => _isZh ? '原文' : 'Original';
+  /// 短标签版（生词本证据行用），与长句版同源但更省空间。
+  String get dictationUncertainShort => _isZh ? '对齐不可靠' : 'alignment n/a';
   String get dictationNoPeek => _isZh ? '本段批改前不显示原文' : 'Original hidden until you submit';
 
   String dictationSegment(int current, int total) =>

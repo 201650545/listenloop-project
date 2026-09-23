@@ -445,3 +445,53 @@ final existingIndex = _ankiCards.indexWhere(
 3. **不制造复习债**：仅点存、无证据的词**不出组件**；
 4. **一次最多 2 组件**；
 5. 不做任何 AI 出题也能跑通完整闭环（点存 → 候选池 → 今日计划 → 执行 → 回写证据）。
+
+---
+
+## 十五、落地记录（2026-09-23 · 第一批）
+
+### 15.1 已交付
+
+| 文件 | 职责 |
+|:--|:--|
+| `lib/models/vocabulary_model.dart` | 两层模型：`VocabularyItem`（词本体）+ `VocabularyOccurrence`（上下文证据）、三个枚举、`normalizeTerm()`、JSON 往返 |
+| `lib/models/subtitle_token.dart` | **保留字符位**的分词器：`surface / normalized / charStart / charEnd / tokenIndex`，含 `tokenAt()` 命中测试与 `phraseFor()` 短语圈选（2–5 词） |
+| `lib/data/vocabulary_store.dart` | 两级判重 + toggle + 状态转移 + **持久化**（`SharedPreferences` 键 `listenloop:vocab_items`），写盘串行化 |
+| `lib/training/vocabulary_plan.dart` | **v1 学习计划规则引擎**：纯本地、可解释、组件上限 2、SRS 配额 |
+| `lib/screens/vocabulary_book_screen.dart` | 生词本管理页（Library 二级）：汇总 / 今日计划 / 筛选 / 行内管理 / 证据面板 |
+| `lib/widgets/sentence_display.dart` | 字幕逐词可点（`accumulationMode` 默认关闭，用 `WidgetSpan`） |
+| `lib/screens/listening_screen.dart` | 顶栏「⋯」→ 生词积累模式（三级开关）；`jumpToSentence()` 供回原声 |
+| `lib/screens/library_screen.dart` | 生词本入口（带计数）+ 回原声导航 |
+| `lib/screens/root_shell.dart` | **全应用共享**一个 `VocabularyStore`；`ActiveLessonSession` 增加 `startSentenceIndex` + 请求序号 |
+
+### 15.2 这一批做出的三处设计裁决
+
+**① 今日计划与词条列表放在同一页。** 两者是同一件事的两个视角（"我今天练什么" / "我总共存了什么"），拆成两个二级入口只会让用户来回横跳。等闪卡复习上线、入口变多时再拆。
+
+**② Library 入口只在生词本非空时出现。** 空生词本不该在课程列表上占一行；新用户的第一条引导放在积累模式的提示文案里。入口行直接给出「候选 N · 今日计划 M」，不点进去也能看出有没有事要做。
+
+**③ 回原声 = 退出二级页 + 落到证据句 + 开播。** 实现上给 Shell 增加了 `onOpenLessonAtSentence` 回调，并在 `_ListenTab.didUpdateWidget` 里做**同课显式跳转**——因为课程没变时 `GlobalKey` 不重建，`initialSentenceIndex` 只在 `initState` 读一次，只传参数会静默停在原句。
+
+> **★ 测试抓到的一个真实交互断层**：第一版实现里，用户在生词本页点「回原声」后，音频确实跳转开播，但**眼前的页面没变**（二级页仍压在 Shell 之上）——声音在后台响而画面毫无反应。修法是在回调前 `Navigator.of(context).maybePop()` 退出二级页。这类"功能对、观感断"的缺陷只有把 Shell 与页面一起 pump 起来才测得出来。
+
+### 15.3 v1 规则表的一处**超出原设计**的补充
+
+`DictationDiffType.extra`（多写）在原规则表里没有对应行。裁决：多写意味着用户**听到了原文里没有的东西**，属听辨问题而非拼写问题，因此按听辨处理但**只给原声回听、不给重听写**——「重写一遍」对「多写」没有针对性（他不知道该少写哪个）。`matched`（命中）则什么都不出。二者均已在代码注释与测试中显式标注。
+
+### 15.4 验收对照（§14.3 五条）
+
+| 验收标准 | 状态 |
+|:--|:--|
+| ① 断网可用 | ✅ 全部逻辑本地：判重、状态机、计划规则均无网络调用 |
+| ② 可解释 | ✅ `PlanReason` 唯一出口，UI 不得自行拼条件；页面直接显示「依据: …」 |
+| ③ 不制造复习债 | ✅ 仅点存无证据 → 不出组件（有专门测试） |
+| ④ 一次最多 2 组件 | ✅ 引擎内强制截断（`maxComponentsPerItem`） |
+| ⑤ 不做 AI 出题也能闭环 | ✅ 点存 → 候选池 → 计划 → 证据面板 → 回原声 |
+
+### 15.5 未做（下一棒）
+
+- 长按拖动圈短语（`phraseFor` / `phraseSpan` 已就绪，UI 未接）
+- 组件的**执行页**（回原声/重听写/Cloze 目前只有建议标签，点了还没有落地页）
+- 闪卡复习入口（`EPIC-04` 既有的 `AnkiReviewDialog` 仍是按句判重的老模型）
+- lemma 归并与 phrase lexicon
+- AI 出题与开放答案评判（v1.5）

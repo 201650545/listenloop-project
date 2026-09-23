@@ -400,6 +400,11 @@ class ListeningScreenState extends State<ListeningScreen>
     _pageMode = widget.initialPageMode;
     _itemKeys = List.generate(_controller.sentenceCount, (_) => GlobalKey());
     _lastSentenceIndex = widget.initialSentenceIndex;
+    // 自动点词的存档跨启动存活：只有自建（无人注入共享实例）时才需要装载，
+    // 共享实例由上层（RootShell）负责装载，避免重复读盘。
+    if (widget.vocabularyStore == null) {
+      unawaited(_vocabularyStore.load());
+    }
     _controller.addListener(_onControllerChanged);
     // V2 §三十二: the shell can reach the active controller (pause when the
     // user opens Settings) without exposing the playback architecture.
@@ -536,6 +541,18 @@ class ListeningScreenState extends State<ListeningScreen>
   /// re-aligns to the currently playing sentence on its next build.
   void revealCurrentSentence() {
     if (!mounted) return;
+    setState(() => _revealToken++);
+  }
+
+  /// 附属层「回原声」入口：跳到指定句（生词本证据里的句子）。
+  ///
+  /// 播的必须是**原片句轴音频**（08 定调红线：不得用合成音替代）。
+  /// 越界或尚未初始化时静默忽略 —— 附属功能失败不得阻塞核心。
+  void jumpToSentence(int index, {bool autoplay = true}) {
+    if (!mounted || !_controller.isInitialized) return;
+    if (index < 0 || index >= _controller.sentenceCount) return;
+    unawaited(_controller.selectSentence(index));
+    if (autoplay) unawaited(_controller.playCurrentSentence());
     setState(() => _revealToken++);
   }
 

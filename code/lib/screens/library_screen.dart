@@ -14,15 +14,18 @@ import '../creation/creation_screen.dart';
 import '../creation/lesson_input.dart';
 import '../creation/lesson_job_stage.dart';
 import '../data/ai_governor_service.dart';
+import '../data/vocabulary_store.dart';
 import '../l10n/ll_strings.dart';
 import '../lesson/lesson_package_exception.dart';
 import '../lesson/lesson_package_reader.dart';
 import '../models/ai_governor_model.dart';
 import '../models/lesson.dart';
+import '../models/vocabulary_model.dart';
 import '../models/sentence.dart';
 import '../preferences/app_preferences.dart';
 import '../storage/lesson_repository.dart';
 import '../theme/listenloop_theme.dart';
+import '../training/vocabulary_plan.dart';
 import '../widgets/anki/anki_review_dialog.dart';
 import '../widgets/library/lesson_continue_card.dart';
 import '../widgets/library/lesson_editorial_row.dart';
@@ -31,6 +34,7 @@ import '../widgets/library/lesson_poster_card.dart';
 import '../widgets/ll_brand.dart';
 import '../widgets/subtitle_mode_selector.dart' show SubtitleMode, SubtitleModeX;
 import 'listening_screen.dart';
+import 'vocabulary_book_screen.dart';
 
 const String _httpUserAgent = 'Mozilla/5.0 (Linux; Android 14) ListenLoop/1.0';
 
@@ -50,6 +54,8 @@ class LibraryScreen extends StatefulWidget {
     this.onOpenLesson,
     this.onOpenCreationTab,
     this.aiGovernorService,
+    this.vocabularyStore,
+    this.onOpenLessonAtSentence,
   });
 
   final LessonRepository repository;
@@ -77,6 +83,20 @@ class LibraryScreen extends StatefulWidget {
 
   /// AI Governor service for managing weaknesses and quizzes.
   final AiGovernorService? aiGovernorService;
+
+  /// 生词本存储（通常由 RootShell 注入共享实例；测试可自建）。
+  final VocabularyStore? vocabularyStore;
+
+  /// 打开课程并直接落在指定句子 —— 生词本「回原声」用。
+  ///
+  /// 为什么单开一个回调而不是复用 [onOpenLesson]：回原声必须**精确落到
+  /// 那句**（证据所在句），而 onOpenLesson 只表达"打开这门课"。
+  final void Function(
+    LessonWithProgress item,
+    List<Sentence> sentences,
+    int sentenceIndex,
+  )?
+  onOpenLessonAtSentence;
 
   @override
   State<LibraryScreen> createState() => LibraryScreenState();
@@ -111,15 +131,27 @@ class LibraryScreenState extends State<LibraryScreen> {
   late final AiGovernorService _aiGovernorService =
       widget.aiGovernorService ?? AiGovernorService();
 
+  late final VocabularyStore _vocabularyStore =
+      widget.vocabularyStore ?? VocabularyStore();
+
   @override
   void initState() {
     super.initState();
     _reload();
+    _vocabularyStore.addListener(_onVocabularyChanged);
+    if (widget.vocabularyStore == null) {
+      unawaited(_vocabularyStore.load());
+    }
     widget.creationController.addListener(_onCreationChanged);
     _aiGovernorService.addListener(_onAiGovernorChanged);
   }
 
   void _onAiGovernorChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 生词本变化（精听页点词、生词本页里的增删）→ 刷新入口上的计数。
+  void _onVocabularyChanged() {
     if (mounted) setState(() {});
   }
 
@@ -137,6 +169,7 @@ class LibraryScreenState extends State<LibraryScreen> {
   @override
   void dispose() {
     widget.creationController.removeListener(_onCreationChanged);
+    _vocabularyStore.removeListener(_onVocabularyChanged);
     _aiGovernorService.removeListener(_onAiGovernorChanged);
     super.dispose();
   }
@@ -698,6 +731,7 @@ class LibraryScreenState extends State<LibraryScreen> {
           _buildHeader(context),
           _buildCreationBanner(context),
           _buildAnkiBanner(context),
+        _buildVocabularyEntry(context),
           Expanded(child: _EmptyLibrary(onImport: _onImportPressed)),
         ],
       );
@@ -711,6 +745,7 @@ class LibraryScreenState extends State<LibraryScreen> {
         _buildHeader(context),
         _buildCreationBanner(context),
         _buildAnkiBanner(context),
+        _buildVocabularyEntry(context),
         if (languages.length >= 2) ...[
           LessonLanguageTabs(
             languages: languages,
@@ -810,6 +845,164 @@ class LibraryScreenState extends State<LibraryScreen> {
       );
     }
     return const SizedBox.shrink();
+  }
+
+  /// 生词本入口（Library 二级）。
+  ///
+  /// 只在**已有生词**时出现：空生词本不该在课程列表上占一行
+  /// （新用户的第一条引导在积累模式的提示里）。行上直接给出
+  /// 「候选 / 今日待练」两个数字，不必点进去才能看出有没有事要做。
+  Widget _buildVocabularyEntry(BuildContext context) {
+    final store = _vocabularyStore;
+    if (store.itemCount == 0) return const SizedBox.shrink();
+    final ll = context.ll;
+    final s = LLStrings.of(context);
+    final plan = const VocabularyPlanner().build(store.items);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LLSpacing.xl,
+        0,
+        LLSpacing.xl,
+        LLSpacing.sm,
+      ),
+      child: InkWell(
+        key: const Key('vocabulary-entry'),
+        onTap: _openVocabularyBook,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: ll.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: ll.divider),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.bookmark_border_rounded,
+                size: 17,
+                color: ll.textSecondary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      s.vocabBook,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: ll.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      plan.isEmpty
+                          ? s.vocabCandidateCount(store.candidateCount)
+                          : '${s.vocabCandidateCount(store.candidateCount)} · '
+                                '${s.vocabTodayPlan} ${plan.length}',
+                      style: TextStyle(fontSize: 11.5, color: ll.textTertiary),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: ll.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openVocabularyBook() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VocabularyBookScreen(
+          store: _vocabularyStore,
+          onOpenOccurrence: _openVocabularyOccurrence,
+        ),
+      ),
+    );
+  }
+
+  /// 「回原声」：定位到该证据所在的课程与句子。
+  ///
+  /// 附属功能的失败路径必须安静收场（08 红线：附属失败不得阻塞核心）——
+  /// 课程已被删除时只给一句提示，不抛异常、不弹错误框。
+  Future<void> _openVocabularyOccurrence(VocabularyOccurrence occurrence) async {
+    final items = _items ?? const <LessonWithProgress>[];
+    LessonWithProgress? target;
+    for (final item in items) {
+      if (item.lesson.id == occurrence.lessonId) {
+        target = item;
+        break;
+      }
+    }
+    if (target == null) {
+      _toast(LLStrings.of(context).vocabLessonMissing);
+      return;
+    }
+
+    final data = await widget.repository.getLessonWithSentences(
+      target.lesson.id,
+    );
+    if (!mounted || data == null) return;
+    if (data.sentences.isEmpty) return;
+
+    // 句子下标以存档为准，越界时夹到合法范围（课程被重新导入过的情况）。
+    final index = occurrence.sentenceIndex.clamp(0, data.sentences.length - 1);
+
+    if (widget.onOpenLessonAtSentence != null) {
+      widget.onOpenLessonAtSentence!(target, data.sentences, index);
+      return;
+    }
+
+    final builder = widget.listeningScreenBuilder;
+    if (builder != null) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => builder(context, target!, data.sentences),
+        ),
+      );
+      return;
+    }
+
+    final progress = target.progress;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ListeningScreen(
+          title: target!.lesson.title,
+          language: target.lesson.language,
+          sentences: data.sentences,
+          audioAsset: target.lesson.audioPath,
+          audioIsFile: true,
+          lessonId: target.lesson.id,
+          repository: widget.repository,
+          coverPath: target.lesson.coverPath,
+          videoSource: target.lesson.video,
+          initialSentenceIndex: index,
+          autoPlay: true,
+          initialRepeatTarget: progress?.repeatTarget ?? 1,
+          initialPlaybackRate: progress?.playbackRate ?? 1.0,
+          initialSubtitleMode: progress?.subtitleMode,
+          initialPageMode: progress?.displayMode == 'page',
+        ),
+      ),
+    );
+    await _reload();
+  }
+
+  void _toast(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _buildAnkiBanner(BuildContext context) {
