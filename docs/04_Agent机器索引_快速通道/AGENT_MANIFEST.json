@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "project": "ListenLoop (AI Intensive Listening Runtime)",
+  "version": "1.0.0",
+  "device_target": "Xiaomi 14 (Android 14 / HyperOS)",
+  "app_package": "com.listenloop.listenloop",
+  "workspace_root": "D:/listenloop",
+  "docs_root": "D:/Work/AI精听训练器",
+
+  "user_facing_cockpit": {
+    "dashboard_overview": "D:/Work/AI精听训练器/00_项目驾驶舱_可视化中心/01_项目全景与演进看板.md",
+    "roadmap_gantt": "D:/Work/AI精听训练器/00_项目驾驶舱_可视化中心/02_发展前景与里程碑路线.md",
+    "wbs_breakdown": "D:/Work/AI精听训练器/00_项目驾驶舱_可视化中心/03_WBS任务分解全景图.md",
+    "canvas_board": "D:/Work/AI精听训练器/00_项目驾驶舱_可视化中心/项目演进大白板.canvas",
+    "visual_library": {
+      "learning_flow": "D:/Work/AI精听训练器/00_项目驾驶舱_可视化中心/可视化图表库/01_学习闭环与特训流程图.md",
+      "nav_topology": "D:/Work/AI精听训练器/00_项目驾驶舱_可视化中心/可视化图表库/02_三级页面导航拓扑图.md",
+      "media_dataflow": "D:/Work/AI精听训练器/00_项目驾驶舱_可视化中心/可视化图表库/03_多模态影视精听数据流.md"
+    }
+  },
+
+  "route_manifest": {
+    "level_1_root_tabs": [
+      {
+        "id": "L1_LIBRARY",
+        "name": "LibraryScreen",
+        "source": "lib/screens/library_screen.dart",
+        "doc": "02_工程架构与系统设计/02_页面层级与路由契约.md",
+        "components": [
+          "lib/widgets/library/lesson_poster_card.dart",
+          "lib/widgets/library/lesson_editorial_row.dart",
+          "lib/widgets/library/lesson_language_tabs.dart"
+        ],
+        "slots": ["_DynamicAiGovernorCard"]
+      },
+      {
+        "id": "L1_LISTEN",
+        "name": "ListeningScreen",
+        "source": "lib/screens/listening_screen.dart",
+        "doc": "02_工程架构与系统设计/02_页面层级与路由契约.md",
+        "components": [
+          "lib/widgets/listening_top_bar.dart",
+          "lib/player/listening_playback_controller.dart",
+          "lib/widgets/subtitle_mode_selector.dart"
+        ],
+        "triggers": ["onTapSparkle -> L2_AI_TUTOR_SHEET"]
+      },
+      {
+        "id": "L1_LEARN",
+        "name": "LearningCenterScreen",
+        "source": "lib/screens/learning_center_screen.dart",
+        "doc": "02_工程架构与系统设计/03_纯英文Anki与AI机制设计.md",
+        "status": "NEXT_SPRINT",
+        "components": ["AnkiDueTodayCard", "PhoneticWeaknessRadar", "WordBookTile"]
+      },
+      {
+        "id": "L1_CREATE",
+        "name": "CreationScreen",
+        "source": "lib/creation/creation_screen.dart",
+        "doc": "02_工程架构与系统设计/02_页面层级与路由契约.md",
+        "components": ["lib/creation/creation_controller.dart"]
+      },
+      {
+        "id": "L1_SETTINGS",
+        "name": "SettingsScreen",
+        "source": "lib/screens/settings_screen.dart",
+        "doc": "02_工程架构与系统设计/02_页面层级与路由契约.md"
+      }
+    ],
+    "level_2_sub_routes": [
+      {
+        "id": "L2_AI_TUTOR_SHEET",
+        "name": "AiTutorSheet",
+        "source": "lib/widgets/ai_tutor_sheet.dart",
+        "doc": "00_项目驾驶舱_可视化中心/可视化图表库/01_学习闭环与特训流程图.md",
+        "features": ["3-Minute Quiz Countdown", "AI Chat Stream", "Seek Sentence Jump"]
+      },
+      {
+        "id": "L2_ANKI_SESSION",
+        "name": "AnkiReviewSessionScreen",
+        "source": "lib/screens/anki_review_session_screen.dart",
+        "doc": "02_工程架构与系统设计/03_纯英文Anki与AI机制设计.md",
+        "status": "IN_PROGRESS"
+      },
+      {
+        "id": "L2_WORDBOOK",
+        "name": "WordBookScreen",
+        "source": "lib/screens/word_book_screen.dart",
+        "doc": "02_工程架构与系统设计/03_纯英文Anki与AI机制设计.md",
+        "status": "IN_PROGRESS"
+      }
+    ]
+  },
+
+  "data_contracts": {
+    "sqlite_tables": ["lessons", "sentences", "learning_progress", "weakness_records", "starred_words"],
+    "models": [
+      "lib/models/lesson.dart",
+      "lib/models/sentence.dart",
+      "lib/models/video_source.dart",
+      "lib/models/ai_governor_model.dart"
+    ],
+    "services": [
+      "lib/data/ai_governor_service.dart",
+      "lib/storage/lesson_repository.dart"
+    ]
+  },
+
+  "active_priorities": {
+    "current_epic": "EPIC-04: 纯英文 Anki 记忆卡体系",
+    "active_tasks": [
+      "Task 4.2: 纯英文生词打星收藏 (Star Word in ListeningScreen)",
+      "Task 4.3: 连读弱读规则自动标注 (Phonetic Linking Rule Extractor)",
+      "Task 4.4: 导出标准 .apkg 卡包 (Anki Package Exporter)"
+    ]
+  }
+}

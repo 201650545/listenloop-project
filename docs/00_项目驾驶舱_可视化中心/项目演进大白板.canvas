@@ -1,0 +1,396 @@
+{
+  "nodes": [
+    {
+      "id": "hub-header",
+      "x": -460,
+      "y": -120,
+      "width": 380,
+      "height": 220,
+      "type": "text",
+      "text": "## 🎯 ListenLoop 演进总指挥中心\n\n> **核心战略**：大目标拆解为小步快跑，技术由 AI 兜底，用户只审阅大方向与验收实际体验。\n\n- **当前主版本**：AI 智能管家 MVP + 你的名字 1589 句\n- **设备状态**：小米 14 (HyperOS) 真机验收完毕\n- **当前阶段焦点**：生词本与 Anki 记忆卡打通",
+      "color": "6"
+    },
+    {
+      "id": "hub-kpi",
+      "x": -460,
+      "y": 140,
+      "width": 380,
+      "height": 260,
+      "type": "text",
+      "text": "### 📊 核心资产仪表盘\n\n- 🟢 **已入库总句子**：**1903 句** 毫秒级中外双语\n- 🟢 **正式课程库**：\n  1. 《你的名字》中日双语电影全片 (1589 句)\n  2. TED-Ed 希腊音乐 (36 句)\n  3. 英语思维输入 Vlog (278 句)\n- 🟢 **AI 伴学闭环**：3 题快测 + 倒计时 + 错题跳转\n- 🟢 **代码门禁**：0 Errors, 0 Warnings, 全量测试通过",
+      "color": "4"
+    },
+    {
+      "id": "hub-legend",
+      "x": -460,
+      "y": 440,
+      "width": 380,
+      "height": 200,
+      "type": "text",
+      "text": "### 🏷️ 节点状态图例\n\n- 🟢 **绿色卡片**：已交付并在真机验证通过的小目标\n- 🟡 **黄色卡片**：当前正在推进的阶段小目标 (Next)\n- ⚪ **紫色/青色卡片**：规划中的远期大目标 (Future)\n\n*拖动、滚轮缩放即可探索全图*",
+      "color": "3"
+    },
+    {
+      "id": "group-ai",
+      "x": 0,
+      "y": -140,
+      "width": 420,
+      "height": 1050,
+      "type": "group",
+      "label": "🤖 赛道一：AI 智能管家 (Learning Runtime)",
+      "color": "5"
+    },
+    {
+      "id": "ai-mvp-quiz",
+      "x": 30,
+      "y": -70,
+      "width": 360,
+      "height": 180,
+      "type": "text",
+      "text": "### 🟢 【已完成】随堂 3 题限时快测\n- 播放页左上角 `✨` 一键呼出\n- 动态生成 3 道单选题（核心理解、连读辨析、语境应用）\n- 倒计时高压作答，选错即时解析",
+      "color": "4"
+    },
+    {
+      "id": "ai-mvp-tutor",
+      "x": 30,
+      "y": 140,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟢 【已完成】AI 伴学即时讨论\n- 以当前正在播放的句子为上下文\n- 支持语法剖析、文化背景、发音技巧多轮交流\n- 纯本地组件化渲染，响应零阻塞",
+      "color": "4"
+    },
+    {
+      "id": "ai-mvp-slot",
+      "x": 30,
+      "y": 340,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟢 【已完成】首页动态弱点插槽\n- 书架页顶部根据用户错题数据动态渲染\n- 呈现「尚雯婕 3 分钟限时精听法」专属入口\n- 动态引导用户消灭听力盲区",
+      "color": "4"
+    },
+    {
+      "id": "ai-next-playlist",
+      "x": 30,
+      "y": 540,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟡 【下一步小目标】错题聚合重听\n- 自动将快测中做错的句子聚合为「今日重听清单」\n- 提供专门的弱点攻坚无限循环模式\n- 听懂后一键消题",
+      "color": "3"
+    },
+    {
+      "id": "ai-future-governor",
+      "x": 30,
+      "y": 740,
+      "width": 360,
+      "height": 140,
+      "type": "text",
+      "text": "### ⚪ 【远期大目标】全自主学习管家\n- 自动评估用户听力能力雷达图\n- 动态调控界面组件、推送个性化教材\n- 扮演 24 小时私人定制外教",
+      "color": "5"
+    },
+    {
+      "id": "group-method",
+      "x": 470,
+      "y": -140,
+      "width": 420,
+      "height": 850,
+      "type": "group",
+      "label": "⚡ 赛道二：尚雯婕 3 分钟限时精听法",
+      "color": "2"
+    },
+    {
+      "id": "method-timer",
+      "x": 500,
+      "y": -70,
+      "width": 360,
+      "height": 180,
+      "type": "text",
+      "text": "### 🟢 【已完成】3 分钟高压倒计时\n- 严格限制 180 秒答题窗口，模拟实战压力\n- 专克“假装听懂、实际模糊”的听力惰性\n- 增强听力专注度与瞬时记忆提取",
+      "color": "4"
+    },
+    {
+      "id": "method-seek",
+      "x": 500,
+      "y": 140,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟢 【已完成】错题一键定位原声\n- 错题解析卡片附带「🎧 重新听这句」\n- 点击瞬间 seek 跳转回对应音频毫秒处\n- 结合单句循环直到彻底听清",
+      "color": "4"
+    },
+    {
+      "id": "method-next-cloze",
+      "x": 500,
+      "y": 340,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟡 【下一步小目标】题型多元化\n- 增加“听音填空题（Cloze）”\n- 增加“连读/弱读辨析对错题”\n- 强化语音层面的实战辨别力",
+      "color": "3"
+    },
+    {
+      "id": "method-future-shadow",
+      "x": 500,
+      "y": 540,
+      "width": 360,
+      "height": 140,
+      "type": "text",
+      "text": "### ⚪ 【远期大目标】影子跟读测评\n- 结合移动端语音识别进行跟读打分\n- 形成“听 ➔ 测 ➔ 读 ➔ 纠”完整闭环",
+      "color": "2"
+    },
+    {
+      "id": "group-anki",
+      "x": 940,
+      "y": -140,
+      "width": 420,
+      "height": 850,
+      "type": "group",
+      "label": "🃏 赛道三：生词本与 Anki 记忆卡 (SRS)",
+      "color": "3"
+    },
+    {
+      "id": "anki-mvp-schema",
+      "x": 970,
+      "y": -70,
+      "width": 360,
+      "height": 180,
+      "type": "text",
+      "text": "### 🟢 【已完成】弱点持久化架构\n- SQLite 底层完成 `weakness_records` 表构建\n- 记录错题所属句子 ID、错误选项与发生时间\n- 具备词句上下文完整提取能力",
+      "color": "4"
+    },
+    {
+      "id": "anki-next-star",
+      "x": 970,
+      "y": 140,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟡 【下一步小目标】生词打星收藏\n- 精听播放界面支持长按划词/打星收藏\n- 自动关联原声台词、发音与双语释义\n- 沉淀为个人生词本",
+      "color": "3"
+    },
+    {
+      "id": "anki-next-export",
+      "x": 970,
+      "y": 340,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟡 【下一步小目标】Anki 卡包导出\n- 一键将生词本导出为标准 `.apkg` 格式\n- 正面：原声对白音频切片 + 挖空句子\n- 背面：中外双语释义 + 语法解析",
+      "color": "3"
+    },
+    {
+      "id": "anki-future-sync",
+      "x": 970,
+      "y": 540,
+      "width": 360,
+      "height": 140,
+      "type": "text",
+      "text": "### ⚪ 【远期大目标】Anki Web 双向同步\n- 引入艾宾浩斯抗遗忘排程\n- 智能安排每天需要复习的生词与句子",
+      "color": "3"
+    },
+    {
+      "id": "group-media",
+      "x": 1410,
+      "y": -140,
+      "width": 420,
+      "height": 850,
+      "type": "group",
+      "label": "🎬 赛道四：多语言影视级全流程制课",
+      "color": "4"
+    },
+    {
+      "id": "media-cjk-segment",
+      "x": 1440,
+      "y": -70,
+      "width": 360,
+      "height": 180,
+      "type": "text",
+      "text": "### 🟢 【已完成】CJK 智能切词与断句\n- 攻克中日韩无空格连写断句难题\n- 建立 2~8 秒黄金精听区间切分算法\n- Whisper 循环假名幻觉清洗",
+      "color": "4"
+    },
+    {
+      "id": "media-your-name",
+      "x": 1440,
+      "y": 140,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟢 【已完成】《你的名字》电影全片\n- 2 小时 45 分钟无删减精修\n- 全片 **1589 句** 毫秒级文学化双语台词\n- 82MB 无损原声 + 4K 超清海报真机入库",
+      "color": "4"
+    },
+    {
+      "id": "media-next-pipeline",
+      "x": 1440,
+      "y": 340,
+      "width": 360,
+      "height": 170,
+      "type": "text",
+      "text": "### 🟡 【下一步小目标】一键导入体验优化\n- 针对 HyperOS 修复系统级文件选择器兼容性\n- 支持一键扫描 Download 目录直接入库",
+      "color": "3"
+    },
+    {
+      "id": "media-future-studio",
+      "x": 1440,
+      "y": 540,
+      "width": 360,
+      "height": 140,
+      "type": "text",
+      "text": "### ⚪ 【远期大目标】电脑端 Studio\n- 任意视频一键拖入自动转写与对齐\n- 可视化波形轨道轻量人工微调",
+      "color": "4"
+    },
+    {
+      "id": "hub-arch",
+      "x": -460,
+      "y": 670,
+      "width": 380,
+      "height": 240,
+      "type": "text",
+      "text": "### 📱 页面三级架构规划\n\n- **L1 (底栏 5 Tab)**：课程 / 精听 / 学习 / 创建 / 设置\n- **L2 (核心二级场景)**：AI伴学抽屉 / Anki翻牌全屏 / 个人生词本 / 弱点攻坚连播\n- **L3 (微观三级交互)**：划词发音解剖 / 错题原声回跳 / Anki .apkg 导出\n\n🔗 详见规范：[[04_页面层级与结构规划]]",
+      "color": "1"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-hub-to-ai",
+      "fromNode": "hub-header",
+      "fromSide": "right",
+      "toNode": "ai-mvp-quiz",
+      "toSide": "left",
+      "color": "5"
+    },
+    {
+      "id": "e-media-to-quiz",
+      "fromNode": "media-your-name",
+      "fromSide": "left",
+      "toNode": "ai-mvp-quiz",
+      "toSide": "right",
+      "color": "4",
+      "label": "提供 1589 句原声"
+    },
+    {
+      "id": "e-quiz-to-tutor",
+      "fromNode": "ai-mvp-quiz",
+      "fromSide": "bottom",
+      "toNode": "ai-mvp-tutor",
+      "toSide": "top",
+      "color": "4"
+    },
+    {
+      "id": "e-quiz-to-seek",
+      "fromNode": "ai-mvp-quiz",
+      "fromSide": "right",
+      "toNode": "method-seek",
+      "toSide": "left",
+      "color": "4",
+      "label": "错题回跳"
+    },
+    {
+      "id": "e-timer-to-quiz",
+      "fromNode": "method-timer",
+      "fromSide": "left",
+      "toNode": "ai-mvp-quiz",
+      "toSide": "right",
+      "color": "4",
+      "label": "3 分钟限时"
+    },
+    {
+      "id": "e-tutor-to-slot",
+      "fromNode": "ai-mvp-tutor",
+      "fromSide": "bottom",
+      "toNode": "ai-mvp-slot",
+      "toSide": "top",
+      "color": "4"
+    },
+    {
+      "id": "e-slot-to-playlist",
+      "fromNode": "ai-mvp-slot",
+      "fromSide": "bottom",
+      "toNode": "ai-next-playlist",
+      "toSide": "top",
+      "color": "3"
+    },
+    {
+      "id": "e-playlist-to-governor",
+      "fromNode": "ai-next-playlist",
+      "fromSide": "bottom",
+      "toNode": "ai-future-governor",
+      "toSide": "top",
+      "color": "5"
+    },
+    {
+      "id": "e-seek-to-cloze",
+      "fromNode": "method-seek",
+      "fromSide": "bottom",
+      "toNode": "method-next-cloze",
+      "toSide": "top",
+      "color": "3"
+    },
+    {
+      "id": "e-cloze-to-shadow",
+      "fromNode": "method-next-cloze",
+      "fromSide": "bottom",
+      "toNode": "method-future-shadow",
+      "toSide": "top",
+      "color": "2"
+    },
+    {
+      "id": "e-quiz-to-anki",
+      "fromNode": "ai-mvp-quiz",
+      "fromSide": "right",
+      "toNode": "anki-mvp-schema",
+      "toSide": "left",
+      "color": "4",
+      "label": "沉淀弱点数据"
+    },
+    {
+      "id": "e-schema-to-star",
+      "fromNode": "anki-mvp-schema",
+      "fromSide": "bottom",
+      "toNode": "anki-next-star",
+      "toSide": "top",
+      "color": "3"
+    },
+    {
+      "id": "e-star-to-export",
+      "fromNode": "anki-next-star",
+      "fromSide": "bottom",
+      "toNode": "anki-next-export",
+      "toSide": "top",
+      "color": "3"
+    },
+    {
+      "id": "e-export-to-sync",
+      "fromNode": "anki-next-export",
+      "fromSide": "bottom",
+      "toNode": "anki-future-sync",
+      "toSide": "top",
+      "color": "3"
+    },
+    {
+      "id": "e-cjk-to-yourname",
+      "fromNode": "media-cjk-segment",
+      "fromSide": "bottom",
+      "toNode": "media-your-name",
+      "toSide": "top",
+      "color": "4"
+    },
+    {
+      "id": "e-yourname-to-pipeline",
+      "fromNode": "media-your-name",
+      "fromSide": "bottom",
+      "toNode": "media-next-pipeline",
+      "toSide": "top",
+      "color": "3"
+    },
+    {
+      "id": "e-pipeline-to-studio",
+      "fromNode": "media-next-pipeline",
+      "fromSide": "bottom",
+      "toNode": "media-future-studio",
+      "toSide": "top",
+      "color": "4"
+    }
+  ]
+}
