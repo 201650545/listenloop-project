@@ -14,6 +14,7 @@ class ListeningTopBar extends StatelessWidget {
     required this.sentenceCount,
     this.leading,
     this.trailing,
+    this.slotWidth = 48,
   });
 
   final int displayIndex;
@@ -24,6 +25,13 @@ class ListeningTopBar extends StatelessWidget {
 
   /// Presentation toggle (fluid ⇄ single-page transcript), pinned right.
   final Widget? trailing;
+
+  /// Width reserved on **both** sides.
+  ///
+  /// The counter is centred by giving left and right identical slots, so this
+  /// must be widened as a pair — adding a second right-hand icon without
+  /// widening the left slot would push the counter off-centre (and overflow).
+  final double slotWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +44,7 @@ class ListeningTopBar extends StatelessWidget {
           children: [
             // Balances the trailing toggle's width so the counter stays
             // truly centred while leading and trailing sit flush left/right.
-            SizedBox(width: 48, child: Center(child: leading)),
+            SizedBox(width: slotWidth, child: Center(child: leading)),
             Expanded(
               child: Center(
                 child: Text(
@@ -48,7 +56,7 @@ class ListeningTopBar extends StatelessWidget {
                 ),
               ),
             ),
-            SizedBox(width: 48, child: Center(child: trailing)),
+            SizedBox(width: slotWidth, child: Center(child: trailing)),
           ],
         ),
       ),

@@ -20,6 +20,77 @@ class LLStrings {
 
   bool get _isZh => uiLanguage == AppLanguage.chinese;
 
+  /// 界面语言判定（供新页面复用，避免各自硬编码中英判断）。
+  bool get isZh => _isZh;
+
+  // --------------------------------------------------------- dictation ----
+  // 听写（核心层 P1）：句级录入、段级集中批改。文案遵循 08 定调——
+  // 第二层原因只能写成「可能与…有关」，不得渲染成确定结论。
+  String get dictation => _isZh ? '听写' : 'Dictation';
+  String get dictationIntro => _isZh
+      ? '听不清就留空，写完整段再对答案'
+      : 'Leave blanks for what you miss — answers come after the segment';
+  String get dictationUnknown => _isZh ? '没听出来' : "Couldn't catch it";
+  String get done => _isZh ? '完成' : 'Done';
+  String get dictationClearUnknown => _isZh ? '取消留空' : 'Unmark';
+  String get dictationSubmit => _isZh ? '提交本段' : 'Submit segment';
+  String get dictationReplay => _isZh ? '重放本句' : 'Replay';
+  String get dictationPrevious => _isZh ? '上一句' : 'Previous';
+  String get dictationNext => _isZh ? '下一句' : 'Next';
+  String get dictationRewrite => _isZh ? '重写本段' : 'Redo segment';
+  String get dictationNextSegment => _isZh ? '下一段' : 'Next segment';
+  String get dictationAccuracy => _isZh ? '准确率' : 'Accuracy';
+  String get dictationBlankCount => _isZh ? '留空' : 'Blank';
+  String get dictationWriteHere => _isZh ? '写下你听到的句子…' : 'Type what you hear…';
+  String get dictationAllAnswered => _isZh ? '每句都已交代，可以提交' : 'All lines answered — ready to submit';
+  String get dictationRemaining => _isZh ? '还有未交代的句子' : 'Some lines still unanswered';
+  String get dictationUncertain => _isZh
+      ? '这一段无法精确定位，只给出整体结果'
+      : 'Alignment unreliable — overall result only';
+  String get dictationYourAnswer => _isZh ? '你的答案' : 'Your answer';
+  String get dictationExpected => _isZh ? '原文' : 'Original';
+  String get dictationNoPeek => _isZh ? '本段批改前不显示原文' : 'Original hidden until you submit';
+
+  String dictationSegment(int current, int total) =>
+      _isZh ? '第 $current / $total 段' : 'Segment $current / $total';
+
+  /// 第二层提示统一出口——**永远带「可能」**。
+  String dictationCause(String key) {
+    switch (key) {
+      case 'weakForm':
+        return _isZh ? '可能与弱读有关' : 'possibly weak form';
+      case 'liaison':
+        return _isZh ? '可能与连读有关' : 'possibly liaison';
+      case 'plosion':
+        return _isZh ? '可能与失爆有关' : 'possibly incomplete plosive';
+      case 'flap':
+        return _isZh ? '可能与闪音有关' : 'possibly flap T/D';
+      default:
+        return '';
+    }
+  }
+
+  String dictationDiffType(String key) {
+    switch (key) {
+      case 'missing':
+        return _isZh ? '漏词' : 'missed';
+      case 'extra':
+        return _isZh ? '多写' : 'extra';
+      case 'spelling':
+        return _isZh ? '拼写近似' : 'spelling';
+      case 'morphology':
+        return _isZh ? '词尾形态' : 'word form';
+      case 'merged':
+        return _isZh ? '词边界(合并)' : 'word boundary';
+      case 'split':
+        return _isZh ? '词边界(拆分)' : 'word boundary';
+      case 'replaced':
+        return _isZh ? '替换' : 'replaced';
+      default:
+        return '';
+    }
+  }
+
   // ------------------------------------------------------------ shell ----
   String get tabLibrary => _isZh ? '课程' : 'Library';
   String get tabListen => _isZh ? '精听' : 'Listen';

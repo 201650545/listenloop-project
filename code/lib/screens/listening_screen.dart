@@ -27,6 +27,7 @@ import '../widgets/sentence_page_list.dart';
 import '../widgets/speed_selector.dart';
 import '../widgets/subtitle_mode_selector.dart';
 import '../widgets/video_area.dart';
+import 'dictation_screen.dart';
 
 /// The listening screen (Visual Polish V1/V2).
 ///
@@ -155,6 +156,19 @@ class ListeningScreenState extends State<ListeningScreen>
   int _transcriptVisibleIndex = 0;
   late final AiGovernorService _aiGovernorService =
       widget.aiGovernorService ?? AiGovernorService();
+
+  /// 核心层 P1：打开听写训练（句级录入 / 段级集中批改）。
+  ///
+  /// 复用同一个播放控制器 —— 用户听到的必须是原片句轴音频，
+  /// 不允许用合成音替代（见 08 定调的交互红线）。
+  void _openDictation() {
+    _controller.pause();
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DictationScreen(controller: _controller),
+      ),
+    );
+  }
 
   void _openAiTutor() {
     _controller.pause();
@@ -711,7 +725,22 @@ class ListeningScreenState extends State<ListeningScreen>
                     color: ll.textSecondary,
                     onPressed: _openAiTutor,
                   ),
-                  trailing: IconButton(
+                  // 右侧现在有两个图标（听写 + 显示模式），左右槽位成对加宽，
+                  // 否则计数器会偏心且 RenderFlex 溢出。
+                  slotWidth: 96,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 核心层 P1：听写入口。刻意放在一级页顶栏 —— 听写属于
+                      // 「听」的主链路，不允许埋进二级或附属面板。
+                      IconButton(
+                        key: const Key('dictation-button'),
+                        tooltip: LLStrings.of(context).dictation,
+                        icon: const Icon(Icons.keyboard_alt_outlined, size: 19),
+                        color: ll.textSecondary,
+                        onPressed: _openDictation,
+                      ),
+                      IconButton(
                     key: const Key('view-mode-button'),
                     tooltip: _pageMode
                         ? LLStrings.of(context).fluidText
@@ -737,6 +766,8 @@ class ListeningScreenState extends State<ListeningScreen>
                       // 模式切回后字幕定位失效，需手动找）。
                       _revealToken++;
                     }),
+                  ),
+                    ],
                   ),
                 ),
                 Expanded(

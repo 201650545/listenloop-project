@@ -35,6 +35,7 @@
 | **尚雯婕四步法** | `L2_TRAIN` | — | [05_尚雯婕精听法产品化设计.md](../02_%E5%B7%A5%E7%A8%8B%E6%9E%B6%E6%9E%84%E4%B8%8E%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/05_%E5%B0%9A%E9%9B%AF%E5%A9%95%E7%B2%BE%E5%90%AC%E6%B3%95%E4%BA%A7%E5%93%81%E5%8C%96%E8%AE%BE%E8%AE%A1.md) |
 | **听伴（AI 陪练）** | `L2_AI_TUTOR` | [ai_tutor_sheet.dart](../../code/lib/widgets/ai_tutor_sheet.dart) | [06_AI陪练与语音交互设计.md](../02_%E5%B7%A5%E7%A8%8B%E6%9E%B6%E6%9E%84%E4%B8%8E%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/06_AI%E9%99%AA%E7%BB%83%E4%B8%8E%E8%AF%AD%E9%9F%B3%E4%BA%A4%E4%BA%92%E8%AE%BE%E8%AE%A1.md) |
 | **闪卡管理** | `L2_ANKI` | `lib/widgets/anki/anki_review_dialog.dart` | [07_Anki闪卡管理与复习策略设计.md](../02_%E5%B7%A5%E7%A8%8B%E6%9E%B6%E6%9E%84%E4%B8%8E%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/07_Anki%E9%97%AA%E5%8D%A1%E7%AE%A1%E7%90%86%E4%B8%8E%E5%A4%8D%E4%B9%A0%E7%AD%96%E7%95%A5%E8%AE%BE%E8%AE%A1.md) |
+| **听写引擎（核心 P1）** | `L2_DICTATION` | [dictation_engine.dart](../../code/lib/training/dictation_engine.dart) + [dictation_session.dart](../../code/lib/training/dictation_session.dart) + [dictation_screen.dart](../../code/lib/screens/dictation_screen.dart) | [09_听写引擎设计与实现.md](../02_%E5%B7%A5%E7%A8%8B%E6%9E%B6%E6%9E%84%E4%B8%8E%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/09_%E5%90%AC%E5%86%99%E5%BC%95%E6%93%8E%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0.md) |
 | **⭐ 优先级基准** | — | — | [08_核心精听优先_产品优先级定调.md](../02_%E5%B7%A5%E7%A8%8B%E6%9E%B6%E6%9E%84%E4%B8%8E%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/08_%E6%A0%B8%E5%BF%83%E7%B2%BE%E5%90%AC%E4%BC%98%E5%85%88_%E4%BA%A7%E5%93%81%E4%BC%98%E5%85%88%E7%BA%A7%E5%AE%9A%E8%B0%83.md) |
 
 ---
@@ -54,7 +55,7 @@
 
 1. `Task 1.4`: 核心听感硬化 —— 句轴精度、切句竞态、播放容错、复读与盲听可用性
 2. `Task 1.5`: 音变标注本地规则（连读 / 弱读 / 失爆 / 闪音，可离线）
-3. `Task 5.1`: **听写引擎** —— 句级录入 → **段级集中批改** → 词级 LCS diff 三色标注 → 错误分类两层（客观 diff 类型 + 训练原因标签）
+3. ✅ `Task 5.1`: **听写引擎**（**已完成** 2026-09-23）—— 句级录入 → 段级集中批改 → 词级 LCS diff → 错误分类两层。代码 `lib/training/dictation_engine.dart`、`dictation_session.dart`、`lib/screens/dictation_screen.dart`；入口在精听页顶栏 `Key('dictation-button')`；设计见 [09_听写引擎设计与实现.md](../02_%E5%B7%A5%E7%A8%8B%E6%9E%B6%E6%9E%84%E4%B8%8E%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1/09_%E5%90%AC%E5%86%99%E5%BC%95%E6%93%8E%E8%AE%BE%E8%AE%A1%E4%B8%8E%E5%AE%9E%E7%8E%B0.md)；全量 `flutter test` **297 项通过**
 4. `Task 5.2`: 同速背诵 —— 录音 + MiMo ASR + 归一化词级准确率 + 时长比判定
 5. `Task 5.3`: 训练周期状态机与 10 篇训练营（播放进度与训练进度分离、跨天续训）
 
