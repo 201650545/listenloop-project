@@ -118,14 +118,17 @@ class VocabularyPlanner {
 
   /// 生成今日计划。
   ///
-  /// [dueAt] 缺省为 null 表示**尚无 SRS 卡**（v1 现状：Item 级调度还没接），
-  /// 此时已掌握的词一律不出组件——宁可少出，也不凭空声称「到期」。
+  /// [dueAt] 缺省时读词条自己的 SRS 卡（`item.srs?.dueAt`）—— 调度挂在
+  /// **Item 级（一个词一张卡）**，所以计划不需要额外传参就能与复习对齐。
+  /// 没有卡（`srs == null`）时返回 null，已掌握的词一律不出组件：
+  /// 宁可少出，也不凭空声称「到期」。
   List<VocabularyPlanEntry> build(
     Iterable<VocabularyItem> items, {
     DateTime? now,
     DateTime? Function(VocabularyItem item)? dueAt,
   }) {
     final stamp = now ?? DateTime.now();
+    final resolveDue = dueAt ?? _defaultDueAt;
     final out = <VocabularyPlanEntry>[];
     var newUsed = 0;
     var reviewUsed = 0;
@@ -138,7 +141,7 @@ class VocabularyPlanner {
       if (item.status == VocabularyStatus.ignored) continue;
 
       if (item.status == VocabularyStatus.known) {
-        final due = dueAt?.call(item);
+        final due = resolveDue(item);
         if (due == null || due.isAfter(stamp)) continue;
         if (reviewUsed >= reviewQuota) continue;
         reviewUsed++;
@@ -252,4 +255,56 @@ class VocabularyPlanner {
 
   /// 一个词一次最多 2 个组件（§14.1 硬约束 ①）。
   static const int maxComponentsPerItem = 2;
+
+  /// 默认到期来源：**Item 级 SRS 卡**（派生规则 3）。
+  static DateTime? _defaultDueAt(VocabularyItem item) => item.srs?.dueAt;
+}
+
+/// 闪卡复习队列 —— **一个词一张卡**（派生规则 3）。
+///
+/// 与今日计划的分工：
+///   * 今日计划回答"今天该练什么"（听辨/拼写/形态的针对性练习）；
+///   * 复习队列回答"哪些卡到期了"（纯记忆调度）。
+///
+/// 配额沿用 07 号文档的建议：新卡 [newQuota] 张、复习 [reviewQuota] 张 ——
+/// 上限存在的意义是**防复习债滚雪球**，不是省事。
+class VocabularyReviewQueue {
+  const VocabularyReviewQueue({this.newLimit = newQuota, this.reviewLimit = reviewQuota});
+
+  static const int newQuota = 5;
+  static const int reviewQuota = 30;
+
+  final int newLimit;
+  final int reviewLimit;
+
+  /// 组装本轮复习队列：**先到期、后新卡**。
+  ///
+  /// 候选池不算数（还没确认要学，不该背复习债），已忽略的也不算。
+  List<VocabularyItem> build(Iterable<VocabularyItem> items, {DateTime? now}) {
+    final stamp = now ?? DateTime.now();
+    final due = <VocabularyItem>[];
+    final fresh = <VocabularyItem>[];
+
+    for (final item in items) {
+      // 候选池整体排除 —— 哪怕他手里已经有一张卡：用户把它退回候选池，
+      // 就是"暂时不想学"，此时再拿复习卡催他等于自己制造复习债。
+      if (item.status == VocabularyStatus.candidate) continue;
+      if (item.status == VocabularyStatus.ignored) continue;
+      final srs = item.srs;
+      if (srs == null) {
+        // 没有卡：只有进了学习队列的才算"新卡"
+        if (item.status == VocabularyStatus.learning ||
+            item.status == VocabularyStatus.known) {
+          fresh.add(item);
+        }
+        continue;
+      }
+      if (srs.isDue(stamp)) due.add(item);
+    }
+
+    due.sort((a, b) => a.srs!.dueAt.compareTo(b.srs!.dueAt));
+    fresh.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    return <VocabularyItem>[...due.take(reviewLimit), ...fresh.take(newLimit)];
+  }
 }

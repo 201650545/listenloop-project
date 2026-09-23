@@ -119,6 +119,55 @@ abstract final class SubtitleTokenizer {
     }
     return null;
   }
+
+  /// 一次长按拖动的结果（跨词选择）。
+  ///
+  /// 单测入口：[selectionFor]；越界或超过 [kMaxPhraseTokens] 时返回 null。
+  static SubtitleSelection? selectionFor(
+    String sentence,
+    List<SubtitleToken> tokens,
+    int fromTokenIndex,
+    int toTokenIndex,
+  ) {
+    final span = phraseSpan(tokens, fromTokenIndex, toTokenIndex);
+    if (span == null) return null;
+    final text = phraseFor(sentence, tokens, fromTokenIndex, toTokenIndex);
+    if (text.isEmpty) return null;
+    final lo = fromTokenIndex < toTokenIndex ? fromTokenIndex : toTokenIndex;
+    final hi = fromTokenIndex < toTokenIndex ? toTokenIndex : fromTokenIndex;
+    return SubtitleSelection(
+      text: text,
+      charStart: span.$1,
+      charEnd: span.$2,
+      tokenCount: hi - lo + 1,
+    );
+  }
+}
+
+/// 长按拖动圈出的一段文字。
+///
+/// [tokenCount] 为 1 时等价于「单个词」——UI 与存储据此决定它是 word 还是 phrase，
+/// 但选择器本身不掺业务语义（不依赖 vocabulary 模型）。
+class SubtitleSelection {
+  const SubtitleSelection({
+    required this.text,
+    required this.charStart,
+    required this.charEnd,
+    required this.tokenCount,
+  });
+
+  /// 取自原句原文的切片（保留词间标点与空格）。
+  final String text;
+  final int charStart;
+  final int charEnd;
+  final int tokenCount;
+
+  /// 圈了 2 个及以上词才算短语。
+  bool get isPhrase => tokenCount > 1;
+
+  @override
+  String toString() =>
+      'SubtitleSelection("$text" $charStart-$charEnd, $tokenCount 词)';
 }
 
 /// 短语最多允许圈几个词。

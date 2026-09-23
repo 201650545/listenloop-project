@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../data/vocabulary_store.dart';
+import '../player/audio_player_facade.dart';
 import '../l10n/ll_strings.dart';
 import '../models/vocabulary_model.dart';
 import '../theme/listenloop_theme.dart';
 import '../training/vocabulary_plan.dart';
+import 'vocabulary_drill_screen.dart';
+import 'vocabulary_review_screen.dart';
 
 /// 生词本 —— Library 的**二级页面**（附属层，见 08 定调与 10 号文档 §十二）。
 ///
@@ -23,9 +26,18 @@ class VocabularyBookScreen extends StatefulWidget {
     super.key,
     required this.store,
     this.onOpenOccurrence,
+    this.audioFacade,
+    this.now,
   });
 
   final VocabularyStore store;
+
+  /// 练习页 / 复习页播原声用的音频门面 —— 测试注入假门面，
+  /// 生产传 null 让子页自建（省得只为看列表也起播放器）。
+  final AudioPlayerFacade? audioFacade;
+
+  /// 测试注入"现在"，让到期判断可控；生产传 null 用系统时间。
+  final DateTime? now;
 
   /// 「回原声」——把用户送到该证据所在的课程与句子上。
   ///
@@ -86,10 +98,20 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
                 ),
               ),
               SliverToBoxAdapter(
+                child: _ReviewEntry(
+                  palette: ll,
+                  dueCount: _dueCount,
+                  onTap: _startReview,
+                ),
+              ),
+              SliverToBoxAdapter(
                 child: _PlanSection(
                   palette: ll,
                   entries: plan,
                   emptyText: s.vocabTodayPlanEmpty,
+                  onStartDrill: _startDrill,
+                  onStartReview: (entry) =>
+                      _startReview(onlyItemId: entry.item.id),
                 ),
               ),
               SliverToBoxAdapter(
@@ -158,6 +180,50 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 到期卡片数（含从未复习过的新卡）—— 入口上直接显示，点进去才有事做。
+  int get _dueCount {
+    final store = widget.store;
+    return store.dueForReview(now: widget.now).length +
+        store.newReviewCards().length;
+  }
+
+  /// 进入复习页。传入单张时只走那一张（从计划里单点进来）。
+  Future<void> _startReview({String? onlyItemId}) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VocabularyReviewScreen(
+          store: widget.store,
+          queueIds: onlyItemId == null ? null : <String>[onlyItemId],
+          audioFacade: widget.audioFacade,
+          autoCreateAudioFacade: widget.audioFacade == null,
+          now: widget.now,
+        ),
+      ),
+    );
+  }
+
+  /// 进入练习页执行这条计划。
+  ///
+  /// 只带**可执行**的组件（SRS 复习不在这里做，那是复习页的职责）。
+  Future<void> _startDrill(VocabularyPlanEntry entry) async {
+    final drillable = entry.components
+        .where((c) => c != StudyComponent.srsReview)
+        .toList(growable: false);
+    if (drillable.isEmpty) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VocabularyDrillScreen(
+          store: widget.store,
+          itemId: entry.item.id,
+          components: drillable,
+          audioFacade: widget.audioFacade,
+          // 注入了门面就别再自建真实播放器（测试环境没有音频插件）
+          autoCreateAudioFacade: widget.audioFacade == null,
+        ),
       ),
     );
   }
@@ -293,11 +359,15 @@ class _PlanSection extends StatelessWidget {
     required this.palette,
     required this.entries,
     required this.emptyText,
+    required this.onStartDrill,
+    required this.onStartReview,
   });
 
   final LLPalette palette;
   final List<VocabularyPlanEntry> entries;
   final String emptyText;
+  final void Function(VocabularyPlanEntry entry) onStartDrill;
+  final void Function(VocabularyPlanEntry entry) onStartReview;
 
   @override
   Widget build(BuildContext context) {
@@ -358,6 +428,54 @@ class _PlanSection extends StatelessWidget {
                                 palette: ll,
                                 text: s.planComponentLabel(component.name),
                                 filled: true,
+                              ),
+                            ),
+                          // 只有 SRS 复习的行 → 去复习页；能练的行 → 去练习页。
+                          // 一个词一次只给一个入口，不让用户猜该点哪个。
+                          if (entry.components.every(
+                            (c) => c == StudyComponent.srsReview,
+                          ))
+                            TextButton(
+                              key: Key('review-start-${entry.item.id}'),
+                              onPressed: () => onStartReview(entry),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 2,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text(
+                                s.reviewStart,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: ll.textPrimary,
+                                ),
+                              ),
+                            )
+                          else if (entry.components.any(
+                            (c) => c != StudyComponent.srsReview,
+                          ))
+                            TextButton(
+                              key: Key('drill-start-${entry.item.id}'),
+                              onPressed: () => onStartDrill(entry),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 2,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: Text(
+                                s.drillStart,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: ll.textPrimary,
+                                ),
                               ),
                             ),
                         ],
@@ -641,6 +759,69 @@ class _OccurrenceTile extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+// ------------------------------------------------------------------ 复习入口
+
+/// 闪卡复习入口 —— **有到期卡才出现**。
+///
+/// 数量直接写在行上（`闪卡复习 · 5 张到期`）：没有到期卡时整行隐藏，
+/// 避免"点进去发现没事做"这种白跑一趟。
+class _ReviewEntry extends StatelessWidget {
+  const _ReviewEntry({
+    required this.palette,
+    required this.dueCount,
+    required this.onTap,
+  });
+
+  final LLPalette palette;
+  final int dueCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (dueCount <= 0) return const SizedBox.shrink();
+    final ll = palette;
+    final s = LLStrings.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      child: InkWell(
+        key: const Key('review-entry'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: ll.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: ll.divider),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.style_outlined, size: 17, color: ll.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  s.reviewEntry(dueCount),
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: ll.textPrimary,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: ll.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

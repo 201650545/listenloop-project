@@ -300,6 +300,39 @@ class VocabularyStore extends ChangeNotifier {
     _schedulePersist();
   }
 
+  /// 记录一次学习组件的执行结果（§14.1 硬约束 ③：执行后必须回写证据）。
+  ///
+  /// 走 [VocabularyItem.drills] 而**不是** occurrence —— 练习是"对词条的动作"，
+  /// occurrence 的判重键是上下文位置，同一处反复练会被吞掉。
+  ///
+  /// 刻意**不动** `lastSeenAt`：那是"最近见到"的语义（列表按它排序），
+  /// 练一次不该把这个词顶到列表最前面。
+  VocabularyItem? recordDrill({
+    required String itemId,
+    required String component,
+    required bool passed,
+    String? detail,
+    DateTime? now,
+  }) {
+    final item = _items[itemId];
+    if (item == null) return null;
+    final updated = item.copyWith(
+      drills: <VocabularyDrillLog>[
+        ...item.drills,
+        VocabularyDrillLog(
+          component: component,
+          passed: passed,
+          detail: detail,
+          createdAt: now ?? DateTime.now(),
+        ),
+      ],
+    );
+    _items[itemId] = updated;
+    notifyListeners();
+    _schedulePersist();
+    return updated;
+  }
+
   /// 显式转移学习状态（派生规则 1：状态不随单次证据自动升降）。
   void setStatus(String itemId, VocabularyStatus status) {
     final item = _items[itemId];
@@ -316,6 +349,74 @@ class VocabularyStore extends ChangeNotifier {
 
   void ignore(String itemId) => setStatus(itemId, VocabularyStatus.ignored);
 
+  /// 记录一次闪卡复习（Item 级 SRS，**一个词一张卡**）。
+  ///
+  /// 同时留一条练习记录：SRS 只记"下次什么时候来"，而评级历史
+  /// （什么时候忘过、忘了多少次）对理解这个词真正有价值。
+  VocabularyItem? recordReview({
+    required String itemId,
+    required ReviewRating rating,
+    DateTime? now,
+  }) {
+    final item = _items[itemId];
+    if (item == null) return null;
+    final stamp = now ?? DateTime.now();
+    // 首次复习 = 建卡；之后在既有状态上递进。
+    final base = item.srs ?? VocabularySrs.newCard(stamp);
+    final updated = item.copyWith(
+      srs: base.applyRating(rating, now: stamp),
+      drills: <VocabularyDrillLog>[
+        ...item.drills,
+        VocabularyDrillLog(
+          component: 'srsReview',
+          passed: rating.isPass,
+          detail: rating.name,
+          createdAt: stamp,
+        ),
+      ],
+    );
+    _items[itemId] = updated;
+    notifyListeners();
+    _schedulePersist();
+    return updated;
+  }
+
+  /// 到期需要复习的词条（已有 SRS 卡且已到期），按到期时间升序。
+  ///
+  /// 配额（新卡 5 / 复习 30）由调用方施加 —— 存储层只回答"哪些到期了"。
+  List<VocabularyItem> dueForReview({DateTime? now}) {
+    final stamp = now ?? DateTime.now();
+    final due = <VocabularyItem>[];
+    for (final item in _items.values) {
+      final srs = item.srs;
+      if (srs == null) continue;
+      // 与 VocabularyReviewQueue 同一口径：候选池与已忽略都不催复习
+      if (item.status == VocabularyStatus.candidate) continue;
+      if (item.status == VocabularyStatus.ignored) continue;
+      if (srs.isDue(stamp)) due.add(item);
+    }
+    due.sort((a, b) => a.srs!.dueAt.compareTo(b.srs!.dueAt));
+    return due;
+  }
+
+  /// 还没有卡、但已在学习队列里的词 —— 首次复习即为建卡。
+  ///
+  /// **候选池不进复习**：还没确认要学，不该背复习债。
+  List<VocabularyItem> newReviewCards() {
+    final fresh = <VocabularyItem>[];
+    for (final item in _items.values) {
+      if (item.srs != null) continue;
+      if (item.status != VocabularyStatus.learning &&
+          item.status != VocabularyStatus.known) {
+        continue;
+      }
+      fresh.add(item);
+    }
+    fresh.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return fresh;
+  }
+
+  /// 清空全部内容并落盘（重置用；测试与"重新开始"）。
   void clear() {
     _items.clear();
     _itemSeq = 0;

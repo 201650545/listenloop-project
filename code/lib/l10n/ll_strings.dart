@@ -32,6 +32,9 @@ class LLStrings {
       ? '开启后字幕逐词可点：点一下存入候选，再点取消。不暂停、不弹释义'
       : 'Tap words to collect them; tap again to remove. Playback never stops';
   String get vocabSaved => _isZh ? '已存' : 'Saved';
+  String get vocabPhraseHint => _isZh
+      ? '长按拖动还能圈短语（2–5 个词），如 take off'
+      : 'Long-press and drag to collect a phrase (2–5 words), e.g. take off';
   String get vocabRemoved => _isZh ? '已取消' : 'Removed';
 
   String vocabCandidateCount(int count) =>
@@ -139,6 +142,109 @@ class LLStrings {
     }
   }
 
+
+  // ------------------------------------------------------------- drill ----
+  // 学习组件执行页（附属层，v1 全部本地判定）。两条文案纪律：
+  //   ① 自评必须写成自评，不得伪装成测量结果；
+  //   ② 听写回执要区分「拼写差一点」与「写成别的词」——两类问题不同。
+  String get drillTitle => _isZh ? '练习' : 'Practice';
+  String get drillRelistenTitle => _isZh ? '先听原声' : 'Listen first';
+  String get drillRelistenBody => _isZh
+      ? '用原片音频再听一遍。这一步没有客观对错，按你的自评记录。'
+      : 'Replay the original audio. There is no objective check here — recorded as your own call.';
+  String get drillSelfReported => _isZh ? '自评' : 'self-reported';
+  String get drillListenedOk => _isZh ? '听清了' : 'Got it';
+  String get drillNotYet => _isZh ? '还有没听出的' : 'Not yet';
+  String get drillPlay => _isZh ? '播放原声' : 'Play original';
+  String get drillReplay => _isZh ? '再播一遍' : 'Play again';
+  String get drillNoAudio =>
+      _isZh ? '这一课的音频不在本机，无法回听' : 'Audio is not on this device';
+  String get drillDictationTitle => _isZh ? '听写这一句' : 'Dictate this sentence';
+  String get drillDictationBody =>
+      _isZh ? '提交之前不会显示原文' : 'The original stays hidden until you submit';
+  String get drillWriteHere => _isZh ? '写下你听到的句子…' : 'Type what you hear…';
+  String get drillSubmit => _isZh ? '提交' : 'Submit';
+  String get drillRetry => _isZh ? '再写一次' : 'Try again';
+  String get drillNext => _isZh ? '下一步' : 'Next';
+  String get drillFinish => _isZh ? '完成' : 'Done';
+  String get drillStart => _isZh ? '开始' : 'Start';
+
+  // ------------------------------------------------------------ review ----
+  // 闪卡复习（Item 级，一个词一张卡）。文案纪律同上：不夸大、不假装测量。
+  String get reviewTitle => _isZh ? '闪卡复习' : 'Flashcards';
+  String get reviewReveal => _isZh ? '看答案' : 'Show answer';
+  String get reviewAgain => _isZh ? '忘了' : 'Again';
+  String get reviewHard => _isZh ? '有点难' : 'Hard';
+  String get reviewGood => _isZh ? '记得' : 'Good';
+  String get reviewEasy => _isZh ? '太简单' : 'Easy';
+  String get reviewEmptyTitle => _isZh ? '今天没有到期的卡' : 'Nothing due today';
+  String get reviewEmptyBody => _isZh
+      ? '把候选词加入学习队列后，到期的卡会出现在这里。'
+      : 'Move candidates into the learning queue and due cards show up here.';
+  String get reviewDone => _isZh ? '完成' : 'Done';
+  String get reviewSkip => _isZh ? '跳过' : 'Skip';
+  String get reviewNewCard => _isZh ? '新卡' : 'New';
+  String get reviewNoContext => _isZh
+      ? '这张卡没有上下文，只能凭记忆回想。'
+      : 'No context on this card — recall from memory.';
+  String get reviewStart => _isZh ? '复习' : 'Review';
+  String get reviewFrontHint =>
+      _isZh ? '先回想，再翻面' : 'Recall first, then flip';
+
+  String reviewProgress(int current, int total) =>
+      _isZh ? '第 $current / $total 张' : '$current / $total';
+
+  String reviewEntry(int count) =>
+      _isZh ? '闪卡复习 · $count 张到期' : 'Flashcards · $count due';
+
+  String reviewSummary(int count) =>
+      _isZh ? '本轮复习了 $count 张' : 'Reviewed $count this round';
+
+  /// 下次到期时间：`again` 是 10 分钟，其余按天。
+  String reviewNextDue(int days) => days <= 0
+      ? (_isZh ? '下次：10 分钟后' : 'Next: in 10 min')
+      : (_isZh ? '下次：$days 天后' : 'Next: in $days d');
+  String get drillClozeTitle => _isZh ? '回忆这个词' : 'Recall the word';
+  String get drillClozeBody =>
+      _isZh ? '把空填上（只判这个词）' : 'Fill the blank (only this word is judged)';
+  String get drillClozeHere => _isZh ? '填写这个词…' : 'Type the word…';
+  String get drillMorphTitle => _isZh ? '词尾形态' : 'Word form';
+  String get drillMorphBody => _isZh
+      ? '这次错在词尾形态，不是没听出来 —— 重听帮不上忙。'
+      : 'This was a word-form slip, not a listening miss — replaying will not help.';
+  String get drillMorphYouWrote => _isZh ? '你写的是' : 'You wrote';
+  String get drillMorphCorrect => _isZh ? '正确形态' : 'Correct form';
+  String get drillAck => _isZh ? '记住了' : 'Got it';
+  String get drillNoSteps =>
+      _isZh ? '这个词现在不需要练习' : 'Nothing to drill for this word yet';
+  String get drillUncertainNote => _isZh
+      ? '对齐不可靠，只给整体结果'
+      : 'Alignment unreliable — overall result only';
+
+  String drillProgress(int current, int total) =>
+      _isZh ? '第 $current / $total 步' : 'Step $current / $total';
+
+  String drillAccuracy(int percent) =>
+      _isZh ? '准确率 $percent%' : '$percent% correct';
+
+  String drillHint(String key) {
+    switch (key) {
+      case 'exact':
+        return _isZh ? '正确' : 'Correct';
+      case 'spelling':
+        return _isZh ? '差一点拼写 —— 听清了，是词形没记准' : 'Spelling — you heard it, the form slipped';
+      case 'wrongWord':
+        return _isZh ? '写成了别的词' : 'That was a different word';
+      case 'blank':
+        return _isZh ? '没有作答' : 'Left blank';
+      case 'partial':
+        return _isZh ? '对了一部分' : 'Partly right';
+      case 'alignment':
+        return _isZh ? '对齐不可靠，只给整体结果' : 'Alignment unreliable — overall only';
+      default:
+        return '';
+    }
+  }
 
   // --------------------------------------------------------- dictation ----
   // 听写（核心层 P1）：句级录入、段级集中批改。文案遵循 08 定调——

@@ -178,11 +178,16 @@ class ListeningScreenState extends State<ListeningScreen>
   /// 判重交给 VocabularyStore：Item 层按归一化词形跨课程合并，
   /// Occurrence 层按 (lesson, sentence, 字符区间) 判重，
   /// 所以同一句里的多个词**不会互相覆盖**（现状 AnkiCard 按句判重会覆盖）。
-  bool _toggleWord(SubtitleToken token) {
+  bool _toggleVocabulary({
+    required String surface,
+    required VocabularyKind kind,
+    required int charStart,
+    required int charEnd,
+  }) {
     final sentence = _controller.currentSentence;
     return _vocabularyStore.toggleOccurrence(
-      surface: token.surface,
-      kind: VocabularyKind.word,
+      surface: surface,
+      kind: kind,
       lessonId: widget.lessonId ?? 'demo',
       lessonTitle: widget.title ?? '精听课程',
       sentenceId: sentence.id,
@@ -191,8 +196,76 @@ class ListeningScreenState extends State<ListeningScreen>
       startMs: sentence.startMs,
       endMs: sentence.endMs,
       audioPath: widget.audioAsset ?? '',
-      charStart: token.charStart,
-      charEnd: token.charEnd,
+      charStart: charStart,
+      charEnd: charEnd,
+    );
+  }
+
+  bool _toggleWord(SubtitleToken token) => _toggleVocabulary(
+    surface: token.surface,
+    kind: VocabularyKind.word,
+    charStart: token.charStart,
+    charEnd: token.charEnd,
+  );
+
+  /// 长按拖动圈出的短语（只圈到一个词时按单词处理）。
+  ///
+  /// 与点词走**同一条存储路径**：判重键是字符区间，所以「先点了 take、
+  /// 后来圈出 take off」会得到两条互不覆盖的证据（kind 分别是 word / phrase）。
+  void _onPhraseSelected(SubtitleSelection selection) {
+    final saved = _toggleVocabulary(
+      surface: selection.text,
+      kind: selection.isPhrase ? VocabularyKind.phrase : VocabularyKind.word,
+      charStart: selection.charStart,
+      charEnd: selection.charEnd,
+    );
+    setState(() {});
+    _showVocabFeedback(
+      surface: selection.text,
+      kind: selection.isPhrase ? VocabularyKind.phrase : VocabularyKind.word,
+      charStart: selection.charStart,
+      charEnd: selection.charEnd,
+      saved: saved,
+    );
+  }
+
+  /// 点词 / 圈短语之后的统一反馈。
+  ///
+  /// **只给轻提示与撤销，不弹释义、不暂停音频** ——「存」与「查」必须分开，
+  /// 立刻弹释义会把注意力从声音时间轴拉走（见 10 号文档 §四）。
+  ///
+  /// 区间由调用方显式传入（不用"最近一次"之类的隐式状态），
+  /// 这样撤销回滚的一定是刚存的那一处证据。
+  void _showVocabFeedback({
+    required String surface,
+    required VocabularyKind kind,
+    required int charStart,
+    required int charEnd,
+    required bool saved,
+  }) {
+    final s = LLStrings.of(context);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        duration: const Duration(milliseconds: 1500),
+        content: Text(
+          '${saved ? '✓ ${s.vocabSaved}' : '↩ ${s.vocabRemoved}'}  $surface',
+        ),
+        action: SnackBarAction(
+          label: s.cancel,
+          onPressed: () {
+            _toggleVocabulary(
+              surface: surface,
+              kind: kind,
+              charStart: charStart,
+              charEnd: charEnd,
+            );
+            setState(() {});
+          },
+        ),
+      ),
     );
   }
 
@@ -203,22 +276,12 @@ class ListeningScreenState extends State<ListeningScreen>
   void _onTokenTap(SubtitleToken token) {
     final saved = _toggleWord(token);
     setState(() {});
-
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        duration: const Duration(milliseconds: 1500),
-        content: Text('${saved ? '✓ 已存' : '↩ 已取消'}  ${token.surface}'),
-        action: SnackBarAction(
-          label: LLStrings.of(context).cancel,
-          onPressed: () {
-            _toggleWord(token);
-            setState(() {});
-          },
-        ),
-      ),
+    _showVocabFeedback(
+      surface: token.surface,
+      kind: VocabularyKind.word,
+      charStart: token.charStart,
+      charEnd: token.charEnd,
+      saved: saved,
     );
   }
 
@@ -259,9 +322,20 @@ class ListeningScreenState extends State<ListeningScreen>
                     s.vocabAccumulation,
                     style: TextStyle(fontSize: 14, color: ll.textPrimary),
                   ),
-                  subtitle: Text(
-                    s.vocabAccumulationHint,
-                    style: TextStyle(fontSize: 11.5, color: ll.textTertiary),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        s.vocabAccumulationHint,
+                        style: TextStyle(fontSize: 11.5, color: ll.textTertiary),
+                      ),
+                      const SizedBox(height: 2),
+                      // 长按拖动是隐藏手势 —— 不写出来没人会试
+                      Text(
+                        s.vocabPhraseHint,
+                        style: TextStyle(fontSize: 11, color: ll.textTertiary),
+                      ),
+                    ],
                   ),
                 ),
                 Divider(color: ll.divider, height: 24),
@@ -750,6 +824,7 @@ class ListeningScreenState extends State<ListeningScreen>
                               // 字幕才变成可点 —— 平时不允许把词变成按钮。
                               accumulationMode: _accumulationMode,
                               onTokenTap: _onTokenTap,
+                              onPhraseSelected: _onPhraseSelected,
                               isTokenSaved: (start, end) =>
                                   _vocabularyStore.isSaved(
                                     lessonId: widget.lessonId ?? 'demo',

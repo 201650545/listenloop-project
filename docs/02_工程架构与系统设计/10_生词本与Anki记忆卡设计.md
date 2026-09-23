@@ -495,3 +495,91 @@ final existingIndex = _ankiCards.indexWhere(
 - 闪卡复习入口（`EPIC-04` 既有的 `AnkiReviewDialog` 仍是按句判重的老模型）
 - lemma 归并与 phrase lexicon
 - AI 出题与开放答案评判（v1.5）
+
+---
+
+## 十六、落地记录（2026-09-23 · 第二批：圈短语 / 执行页 / 闪卡复习）
+
+### 16.1 长按拖动圈短语
+
+| 文件 | 改动 |
+|:--|:--|
+| `lib/models/subtitle_token.dart` | 新增 `SubtitleSelection` + `SubtitleTokenizer.selectionFor()`（短语选择的**可测载体**，不掺业务语义） |
+| `lib/widgets/sentence_display.dart` | `_TappableEnglish` 改为 StatefulWidget：长按锚定一个词、拖动按命中词扩展；`onPhraseSelected` 回调 |
+| `lib/screens/listening_screen.dart` | 接 `_onPhraseSelected` → 与点词**同一条存储路径**；「⋯」菜单补长按提示（隐藏手势不写出来没人会试） |
+
+三条实现约束（都是踩过才写下的）：
+
+1. **命中测试靠每个词的 `RenderBox` 矩形，不靠文本偏移** —— 词是 `WidgetSpan` 占位符，段落里的字符下标对不上真实字符位置。
+2. **选中高亮必须走 `TextStyle.backgroundColor`**，不能用 Container 加内边距：否则选中瞬间文字重排，"手指底下的词"会跑掉。有一条专门的测试断言"高亮时词的位置不变"。
+3. **超过 5 个词时夹紧而不是作废** —— 手指继续滑不该让选择突然消失。
+
+行为细节：只圈到 1 个词也回调（交给调用方按单词处理，避免"长按了却没反应"）；同一区间再圈一次 = 取消保存（与点词一致）；**单词与短语是两个词条**（判重键含字符区间）。
+
+### 16.2 学习组件执行页（今日计划的落地页）
+
+| 文件 | 职责 |
+|:--|:--|
+| `lib/training/vocabulary_drill.dart` | **本地判定**：`ClozePrompt` 构造 + `judgeCloze` / `judgeSentenceDictation` / 自评；`DrillHint` 六类提示 |
+| `lib/screens/vocabulary_drill_screen.dart` | 按 `PlanEntry.components` 逐步执行：原声回听 → 单句听写 → Cloze 回忆 → 形态纠错 |
+| `lib/models/vocabulary_model.dart` | 新增 `VocabularyDrillLog` + `VocabularyItem.drills`（**Item 级**） |
+| `lib/data/vocabulary_store.dart` | `recordDrill()`（§14.1 硬约束 ③ 执行后回写） |
+
+四条硬规则：
+
+* **每步完成立刻落盘**（不是整轮结束才写）——中途退出不丢已练的部分，有专门测试；
+* **听写提交前不显示原文**（锁字幕），提交后才揭晓；
+* **自评就写自评**：原声回听没有客观对错，界面上明说，且 `accuracy` 记为 1 或 0 —— 不伪造测量值；
+* **只用原片句轴切片**（`JustAudioFacade` + `SentenceClip[startMs, endMs]`），08 红线。
+
+两处刻意分开的判定：
+
+| 现象 | 提示 | 为什么分开 |
+|:--|:--|:--|
+| 差一点拼写 | `spelling` | 听清了，是词形没记准 → 重听帮不上忙 |
+| 写成别的词 | `wrongWord` | 没听出来 → 需要回原声 |
+
+形态纠错步骤直接告诉用户「这次错在词尾形态，重听帮不上忙」——避免让他去做无效努力。
+
+### 16.3 闪卡复习接入 Item 级模型（**一个词一张卡**）
+
+| 文件 | 职责 |
+|:--|:--|
+| `lib/models/vocabulary_model.dart` | 新增 `VocabularySrs`（SM-2：reviews / intervalDays / easeFactor / dueAt / **lapses**）+ `ReviewRating` 四档 |
+| `lib/data/vocabulary_store.dart` | `recordReview()` / `dueForReview()` / `newReviewCards()` |
+| `lib/training/vocabulary_plan.dart` | 新增 `VocabularyReviewQueue`（到期 + 新卡，配额 5/30）；planner 的 `dueAt` **默认读 `item.srs?.dueAt`** |
+| `lib/screens/vocabulary_review_screen.dart` | 复习会话：正面挖空 → 翻面看答案 → 四档评级 → 小结 |
+
+调度手感与旧闪卡（`AnkiCard`）完全一致（Again 10 分钟、Good 1/3/…、Easy 3/7/…、ease 夹 1.3~3.0、间隔 ≥21 天算已掌握），差别只在**挂在哪**：
+
+| | 旧 `AnkiCard` | 新 `VocabularyItem.srs` |
+|:--|:--|:--|
+| 判重键 | 课程 + 句号 | **词形**（跨课程合并） |
+| 同一个词出现两次 | 两张互不相干的卡 | **同一张卡**，掌握度会累积 |
+| 遗忘次数 | **没有这个字段** | `lapses` 显式记录 |
+| 评级历史 | 无 | `VocabularyDrillLog(component: 'srsReview')` |
+
+> 旧体系**本轮未动**（避免破坏既有链路），两套暂时并存。迁移/下线是下一棒。
+
+### 16.4 本轮被测试抓出来的三个真问题
+
+1. **同一毫秒内多条记录按 `createdAt` 排序不可靠** —— `lastDrill` / `consecutivePasses` / `latestOccurrence` 原本按时间比较，快速连点或测试里会得到不确定结果。改为**以追加顺序为准**（列表只增不改，顺序天然就是时间顺序）。
+2. **已有卡但被退回候选池的词仍被催复习** —— 队列原本只在"没有卡"的分支里排除候选池。用户把词退回候选池就是"暂时不想学"，此时拿复习卡催他等于自己制造复习债。已改为**候选池整体排除**（存储层与队列层同一口径）。
+3. **练习记录不能塞进 `VocabularyOccurrence`** —— occurrence 的判重键是上下文位置，同一处反复练会被判重吞掉；而"练了三次仍然错"恰恰最该留下。因此单独立 `VocabularyDrillLog`（Item 级，不做判重）。
+
+### 16.5 验收对照
+
+| 标准 | 状态 |
+|:--|:--|
+| 断网可用（圈短语 / 执行页 / 复习页） | ✅ 全部判定本地，无网络调用 |
+| 只用原片音频 | ✅ 执行页与复习页都播 `SentenceClip[startMs, endMs]` |
+| 每步回写证据 | ✅ `recordDrill` / `recordReview`，且**逐步**落盘 |
+| 不伪造测量 | ✅ 自评步骤明标自评；不可靠对齐只给整体结果 |
+| 一个词一张卡 | ✅ `srs` 挂在 `VocabularyItem`，跨课程合并 |
+
+### 16.6 未做（下一棒）
+
+- 旧 `AnkiCard` 与新模型的**迁移或下线**（当前两套并存，Library 的 Anki 横幅仍指向旧体系）
+- 组件通过后**自动提升状态**？ —— 目前刻意不做：状态只由显式动作转移（派生规则 1），练对两次不该偷偷把词标成"已掌握"
+- lemma 归并与 phrase lexicon
+- AI 出题与开放答案评判（v1.5）
