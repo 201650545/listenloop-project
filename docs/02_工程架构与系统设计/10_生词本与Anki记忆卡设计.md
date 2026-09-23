@@ -215,7 +215,7 @@ AI 返回的是 `skill state + reasonCodes + recommendedComponentIds`，**不是
 
 备选：`dist/gettysburg.lllesson`（10 句 / 100 秒；转写与权威原文**逐字一致**，但词汇偏古雅）。
 
-### 7.2 质检发现：该课程包转写有 **6 处必须修的真错词**
+### 7.2 质检发现与修正（**已应用，2026-09-23**）：该课程包转写有 6 处真错词
 
 用官方逐字稿（TED-Ed 课程页 / 公开 ESL 站点）做全量比对，**700 词 vs 698 词，相似度 0.9785，差异 14 处**：
 
@@ -234,7 +234,13 @@ AI 返回的是 `skill state + reasonCodes + recommendedComponentIds`，**不是
 
 **为什么这条必须先修**：生词本会把用户点选的词原样存下来。若用户在 `genes` 上点「存」、或听写时把 `jeans` 写成 `genes` 被判错，**系统就在教错词**。8–14 属可接受差异（英美变体/数字写法），1–7 必须修。
 
-> 校验工具已就绪：官方逐字稿 `D:/Work/gh-sync/_teded_official_transcript.txt` + 比对脚本（difflib 词级对齐）。同法可用于质检**任何**新导入课程 —— 建议把「导入后转写质检」做成制课管线的固定关卡。
+**修正结果**：已对句 4 / 12 / 15 / 27 / 35 应用 5 处修正（含 `a common medium → the common medium` 与去除句中多余逗号）；
+参考稿与课程包词级相似度 **0.9785 → 0.9893**；剩余 8 处差异全部为英美拼写（`categorise/civilisation/civilised/theatre`）与数字写法（`three/3`），**非错误，保留**。
+原包已备份为 `dist/teded-greek-music.lllesson.bak-20260923`。
+
+> ⚠️ **一个重要教训**：参考稿只能当**证据**，不能当**圣旨**。本次差异中 `just as obsessed`（课程包）vs `just obsessed`（参考稿）—— **课程包才是对的**，参考稿漏了一个 `as`。修正前必须逐条人工确认，不可脚本盲改。
+>
+> 校验工具：官方逐字稿 `D:/Work/gh-sync/_teded_official_transcript.txt` + difflib 词级对齐脚本。同法可用于质检**任何**新导入课程 —— 建议把「导入后转写质检」做成制课管线的固定关卡。
 
 ---
 
@@ -276,3 +282,166 @@ AI 返回的是 `skill state + reasonCodes + recommendedComponentIds`，**不是
 3. **每段/每篇的候选上限**定多少？（GPT 建议诊断一次最多 5 个词）
 4. **VocabularyItem 与 AnkiCard 的关系**：确认走「生词本体 + 上下文证据」两层、Anki 作为下游？（这会改动现有 `createAnkiCardFromSentence` 的按句判重逻辑）
 5. 「学习计划」首版做到哪一步：只做**组件选择规则表**（E2），还是一并做**节奏编排**（E3 的多次到期编排）？
+
+---
+
+## 十一、决策记录（2026-09-23 用户拍板）
+
+| # | 问题 | 决定 |
+|:--|:--|:--|
+| 1 | 音频选型 | **用 TED-Ed《Music and creativity in Ancient Greece》做测试文档**（转写已修正并重新打包） |
+| 2 | 生词积累 | **可以做** |
+| 3 | 入口图标层级 | **作为三级图标** —— 必须先把一/二/三级页面与菜单的结构处理干净（见 §十二） |
+| 4 | 单次诊断候选上限 | **5 个词** |
+| 5 | 两层模型 | **采纳**（`VocabularyItem` + `VocabularyOccurrence`，详见 §十三） |
+| 6 | 首版学习计划范围 | **先做小部分** —— 只做本地规则映射，不做 AI 出题（详见 §十四） |
+
+---
+
+## 十二、三级结构（页面与菜单同构）
+
+**原则**：层级必须一致可推——一级页面配一级菜单，二级页面配二级菜单，三级只放**动作与开关**，不得再有第四级。
+
+| 层级 | 页面 | 菜单 / 入口 | 内容 |
+|:--|:--|:--|:--|
+| **L1** | 底部主导航 4 页 | 一级菜单＝底部 tab | 课程 Library ／ 精听 Listen ／ 创建 Create ／ 设置 Settings |
+| **L2** | 页面内主分区 | 二级菜单 | Library：课程列表 → **课程详情**；**今日计划 ／ 生词本 ／ 闪卡复习**（管理类都归 Library）<br>精听页：顶栏图标 + **「⋯」面板**<br>设置：七大分组页 |
+| **L3** | — | 三级菜单 / 动作 | 「⋯」面板里的 **生词积累模式**（开关）<br>积累模式内：点词保存 ／ 再点取消 ／ 长按拖动选短语（动作）<br>听写页：提交本段 ／ 重写本段（动作） |
+
+### 两个反复被讨论的落位，按此规则一次定死
+
+* **听写（核心层）＝ L2 直达**：顶栏图标，符合 08「核心操作不得深于 1 层」。
+* **生词积累（附属层）＝ L3**：进「⋯」二级面板，符合 08「附属只能二级入口」+ 本次「图标作为三级」的要求。
+
+> 二者看似冲突，其实是**同一条规则的两面**：**核心允许 L2 直达，附属一律下沉到 L3。** 顶栏不会因此被附属功能塞满。
+
+```
+精听页（L1 页面）
+ └─ 顶栏：听写图标（L2 直达）  ·  ⋯（L2 菜单）
+                                   └─ 生词积累模式（L3 开关）
+                                        └─ 点词保存 / 撤销（L3 动作）
+```
+
+---
+
+## 十三、两层模型详解：`VocabularyItem` vs `VocabularyOccurrence`
+
+### 13.1 一句话区别
+
+| | `VocabularyItem` | `VocabularyOccurrence` |
+|:--|:--|:--|
+| 回答的问题 | **「这个词是什么」** | **「这个词在哪儿被遇到过、当时发生了什么」** |
+| 粒度 | 一个**词 / 短语** | 一次**上下文证据** |
+| 数量 | 1 份 | **N 份**（一对多） |
+| 判重键 | `normalizedTerm`（跨课程、跨句子合并） | `(itemId, lessonId, sentenceId, 字符 span)` |
+| 生命周期 | 长期存在，跨课程累积 | 随课程/句子产生，只增不改 |
+| 谁读它 | 复习调度（SM-2）、生词本列表、今日计划 | 组件选择规则、证据展示、"回原声"跳转 |
+
+**关系**：`1 个 Item ↔ N 个 Occurrence`。
+
+### 13.2 为什么必须分开（三个都来自真实缺陷，不是理论洁癖）
+
+**① 同一个词在多处出现会"碎成多条"**
+只做一层（每个「词+句」一条记录）时，`barbaric` 在课程 A 第 10 句、课程 B 第 88 句会被记成**两条互不相关的记录**。后果：闪卡里出现两张 `barbaric`，复习时间各自独立，**掌握度永远无法累积**——第 3 次遇到它时，系统还以为这是新词。
+
+**② 一句里有多个生词会互相覆盖（现有代码的真实缺陷）**
+`AnkiCard` 挂在句子上，判重是 `lessonId + sentenceIndex`：
+
+```dart
+final existingIndex = _ankiCards.indexWhere(
+  (c) => c.lessonId == lesson.id && c.sentenceIndex == sentence.index,
+);
+```
+
+→ 同一句里点存第二个词，会**覆盖**第一个。两层模型下，同一句可以生成 2 个 Occurrence，分别指向 2 个不同 Item，**互不覆盖**。
+
+**③ 证据来源不同、结论也不同**
+「用户点选的」「听写漏掉的」「AI 判不会的」可能是**同一个词**，但发生的时间、句子、错误类型完全不同。混在一层，就永远说不清**这个词到底哪儿不行**——而 09 已经证明「听写错 ≠ 不认识这个词」（漏 `the` 可能是弱读没听清；`walked→walk` 是词尾；拼错可能只是不熟拼写）。
+
+### 13.3 字段分工
+
+| `VocabularyItem`（1 份） | `VocabularyOccurrence`（N 份） |
+|:--|:--|
+| `id` / `surfaceForm` / `normalizedTerm` | `lessonId` / `lessonTitle` |
+| `kind`: word / phrase | `sentenceId` / `sentenceIndex` / `sentenceText` |
+| **`status`**: candidate/learning/known/ignored | `startMs` / `endMs` / `audioPath`（**回原声用**） |
+| `englishDefinition?` / `chineseGloss?` | `charStart` / `charEnd`（**点词命中用**） |
+| `aiUsageNote?` | **`source`**: tap / dictation / ai |
+| `createdAt` / `lastSeenAt` / **`seenCount`** | `dictationDiffType?` / `expected?` / `actual?` |
+| `ankiCardIds`（调度挂在这里） | `uncertain` / `causeHints`（音变提示） |
+
+**三条派生规则**（决定实现顺序）：
+
+1. `Item.status` **由 Occurrence 汇总推导**，不是手填（候选→学习中→已掌握/忽略）。
+2. `Item.seenCount` = 它的 Occurrence 数量（**重复点同一个词不再产生新 Item，只是 seenCount+1**）。
+3. **SM-2 调度挂在 Item 级** —— 即**一个词一张卡**，而不是一句一张卡。这是与现状最大的结构差异。
+
+### 13.4 用 TED-Ed 这一课走一遍（具体例子）
+
+```
+用户在第 10 句听到 barbaric → 点词保存
+   Item      : { term: "barbaric", status: candidate }
+   Occurrence: { itemId, lesson: teded-greek-music, sentence: 10,
+                 span: [charStart, charEnd], source: tap }
+
+后来听写第 35 句，把 amoral 写成了 a moral → 判定为错误
+   Item      : { term: "amoral", status: candidate }
+   Occurrence: { itemId, sentence: 35, source: dictation,
+                 diffType: replaced/spelling, expected: "amoral", actual: "a moral" }
+
+同一课又出现 barbarian（不同词形）
+   → V1 **不合并**（lemma 归并留到以后，因为 GPT 明确建议
+     「不要把 AI 生成的 lemma/sense 当主键，否则离线判重不稳定」）
+
+用户在另一课又点存 barbaric
+   → **不新建 Item**，只加 Occurrence#3
+   → Item.seenCount 变 2，status 可由 candidate → learning
+```
+
+**一句话对照**：`Item` 是"词典里那一行"，`Occurrence` 是"你在哪些句子、哪一秒、因为什么原因碰到过它"。
+
+---
+
+## 十四、首版学习计划（v1）—— 只做本地规则映射
+
+### 14.1 范围（做）
+
+**输入信号只取两类**（都不依赖 AI）：
+1. **听写证据**（来自 09，本地已有）：`dictationDiffType`
+2. **手动点存**（候选池）
+
+**组件只用 4 个**（纯本地可判定）：
+`original_relisten`（原声回听）／`dictation_retry`（听写这一句）／`cloze_recall`（英文 Cloze 回忆）／`srs_review`（纯 SRS）
+＋ `morphology` 时的**本地纠错展示**（`grammar_repair` 的简化版，只展示正确形态，不判开放答案）。
+
+**输出**：Library 二级页「**今日计划**」—— 一个列表，每项 ＝ `词 + 1~2 个组件按钮`，点进去执行。
+
+**规则表（v1 全部规则，可直接实现）**
+
+| 条件 | 出什么 |
+|:--|:--|
+| 听写 `missing`/`replaced` 且 `uncertain=false` | `original_relisten` + `dictation_retry` |
+| `spelling` | `cloze_recall`（**不判听力差**） |
+| `morphology` | 本地纠错展示 + `cloze_recall` |
+| `merged`/`split` | `original_relisten` + `dictation_retry`（按 chunk 处理） |
+| `uncertain=true` | **只**出 `original_relisten` |
+| 仅手动点存、无其它证据 | **什么都不出**，留候选池 |
+| 已判「会」且 SRS 到期 | 只出 `srs_review` |
+| 已判「会」且未到期 | **什么都不出** |
+
+**三条硬约束**：① 一个词一次最多 2 个组件；② 受 SRS 配额约束（新卡 5 / 复习 30）；③ 执行组件后**回写成功/失败证据**，供下次规则判定。
+
+### 14.2 范围外（留给 v1.5+）
+
+* AI 出题与**开放答案评判**（`context_transfer` / `sentence_production` / `grammar_repair` 的判定）
+* 多次到期的**节奏编排**（SRS 决定何时回来，诊断状态决定练什么 —— 编排属增强）
+* lemma 归并、短语词典（本地 phrase lexicon 只能给建议，不得偷改用户的点选）
+* 文章级 AI 汇总
+
+### 14.3 v1 验收标准（可测）
+
+1. **断网可用**：飞行模式下能生成今日计划并完成全部组件；
+2. **可解释**：每个组件都能回答"因为哪条证据"；
+3. **不制造复习债**：仅点存、无证据的词**不出组件**；
+4. **一次最多 2 组件**；
+5. 不做任何 AI 出题也能跑通完整闭环（点存 → 候选池 → 今日计划 → 执行 → 回写证据）。
