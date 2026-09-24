@@ -87,6 +87,7 @@ class CreationController extends ChangeNotifier {
   DateTime? _startedAt;
   String? _errorMessage;
   CreationError? _errorCode;
+  SourceHint? _sourceHint;
   final List<String> _logLines = [];
   bool _cancelRequested = false;
   int _jobSeq = 0;
@@ -103,6 +104,10 @@ class CreationController extends ChangeNotifier {
 
   String? get errorMessage => _errorMessage;
   CreationError? get errorCode => _errorCode;
+
+  /// Finer-grained reason for [CreationError.sourceUnavailable] — lets the UI
+  /// show the checklist that actually matches the fault (see [SourceHint]).
+  SourceHint? get sourceHint => _sourceHint;
   List<String> get logLines => List.unmodifiable(_logLines);
   bool get isBusy => _stage.isActive;
   bool get isReady => _stage == LessonJobStage.completed && _result != null;
@@ -130,6 +135,7 @@ class CreationController extends ChangeNotifier {
     _result = null;
     _errorMessage = null;
     _errorCode = null;
+    _sourceHint = null;
     _currentInput = null;
     notifyListeners();
   }
@@ -148,6 +154,7 @@ class CreationController extends ChangeNotifier {
     _result = null;
     _errorMessage = null;
     _errorCode = null;
+    _sourceHint = null;
     _logLines
       ..clear()
       ..add('Job: $jobId');
@@ -234,10 +241,11 @@ class CreationController extends ChangeNotifier {
         ).hasMatch(input.source ?? '');
         try {
           if (isYoutube) {
-            // PC relay: yt-dlp + PO-token machinery lives on the PC, with its
-            // traffic exiting through the phone's VPN (the PC-IP blacklist
-            // does not apply to the phone's exit). Audio only — a YouTube
-            // video picture needs an iframe harness and arrives later.
+            // YouTube 取源走中继：中继里是 yt-dlp（Python），安卓没有 Python，
+            // 所以它必须住在能跑 Python 的地方。
+            // 2026-09-23 起中继搬到**手机自己的 Termux** 里，地址仍是
+            // 127.0.0.1:8793 —— 因此本文件与配置都无需改动，且不再依赖电脑。
+            // （电脑端中继仍可用：adb reverse 会把同一端口映射到 PC，二者等价。）
             final relayBaseUrl = youtubeRelayBaseUrlResolver();
             final relay = _youtubeRelayFactory(relayBaseUrl);
             final ytUrl = extractUrl(input.source ?? '') ?? input.source!;
@@ -249,6 +257,7 @@ class CreationController extends ChangeNotifier {
               throw CreationException(
                 CreationError.sourceUnavailable,
                 'youtube relay unreachable at $relayBaseUrl',
+                hint: SourceHint.relayDown,
               );
             }
             final ytId = _extractYouTubeId(ytUrl);
@@ -306,10 +315,12 @@ class CreationController extends ChangeNotifier {
           throw CreationException(CreationError.inputError, error.message);
         } on YouTubeRelayException catch (error) {
           // 链接是好的，坏的是取源通道 —— 归类为 sourceUnavailable，
-          // 文案由界面给出「插线 / 启中继 / 换 B 站」三步（见 l10n）。
+          // relayBlocked 表示中继在线但它自己拿不到音频（代理断线 /
+          // YouTube 拒绝服务），界面据此给"检查代理"而不是"启动中继"。
           throw CreationException(
             CreationError.sourceUnavailable,
             'youtube relay: ${error.message}',
+            hint: SourceHint.relayBlocked,
           );
         }
         await _checkCancel();
@@ -361,9 +372,19 @@ class CreationController extends ChangeNotifier {
       sentenceCount = drafts.length;
       if (drafts.length < 3) {
         // Same guard as the PC pipeline: unusable transcription.
+        //
+        // 带上诊断量再报错。只给"句子太少"时，用户（和后面的排查者）无法分辨
+        // 到底是哪一种：视频本来就短 / 音频里根本没人声 / 切句把内容合并了。
+        // 这三个数的组合能把方向缩到唯一一种（2026-09-23 用户报"只有两句 +
+        // 识别失败"，此前从这条消息里读不出任何可行动信息）：
+        //   audio 很短              -> 视频太短，换长一点的
+        //   audio 长但 words 极少   -> 音频里没人声（纯音乐/静音），或解码没出声音
+        //   words 多但 sentences 少 -> 切句把内容合并了
+        final seconds = (audioDurationMs / 1000).toStringAsFixed(1);
         throw CreationException(
           CreationError.asrError,
-          'only ${drafts.length} sentences, transcription unusable',
+          'only ${drafts.length} sentences, transcription unusable '
+          '(words=${words.length}, audio=${seconds}s)',
         );
       }
       _logLines.add('Sentences: ${drafts.length}');
@@ -435,7 +456,7 @@ class CreationController extends ChangeNotifier {
       _setStage(LessonJobStage.completed);
       return lesson;
     } on CreationException catch (error) {
-      _fail(error.code, error.message);
+      _fail(error.code, error.message, error.hint);
       return null;
     } catch (error, stackTrace) {
       debugPrint('[ListenLoop] creation job failed: $error\n$stackTrace');
@@ -505,12 +526,13 @@ class CreationController extends ChangeNotifier {
     throw const CreationException(CreationError.cancelled, 'job cancelled');
   }
 
-  void _fail(CreationError code, String message) {
+  void _fail(CreationError code, String message, [SourceHint? hint]) {
     // The raw message goes to the debug log; the UI translates the CODE via
     // LLStrings so error copy follows the UI language.
     debugPrint('[ListenLoop] creation failed (${code.name}): $message');
     _errorCode = code;
     _errorMessage = message;
+    _sourceHint = hint;
     _stage = code == CreationError.cancelled
         ? LessonJobStage.cancelled
         : LessonJobStage.failed;

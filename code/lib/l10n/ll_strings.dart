@@ -446,8 +446,7 @@ class LLStrings {
   String get save => _isZh ? '保存' : 'Save';
 
   // ---------------------------------------------------- youtube relay ----
-  String get youtubeRelayTitle =>
-      _isZh ? 'YouTube 中继 (PC)' : 'YouTube Relay (PC)';
+  String get youtubeRelayTitle => _isZh ? 'YouTube 中继' : 'YouTube Relay';
   String get youtubeRelayBaseUrl =>
       _isZh ? '中继服务地址' : 'Relay Base URL';
   String get youtubeRelayBaseUrlHint =>
@@ -460,8 +459,16 @@ class LLStrings {
       _isZh ? '中继未响应：$reason' : 'Relay unreachable: $reason';
   String get youtubeRelayTip =>
       _isZh
-          ? '电脑端运行 python tool/youtube_relay.py。USB 调试需执行 adb reverse tcp:8793 tcp:8793，同 Wi-Fi 局域网可直接填电脑 IP'
-          : 'Run python tool/youtube_relay.py on PC. Use adb reverse tcp:8793 tcp:8793 over USB, or enter PC LAN IP over Wi-Fi.';
+          ? '中继默认跑在手机自己的 Termux 里（不需要电脑）：打开 Termux 跑 '
+                'bash /sdcard/Download/ll_relay_ctl.sh start。\n'
+                '它需要手机的代理已连接才能访问 YouTube。\n'
+                '也可改用电脑端中继：运行 python tool/youtube_relay.py 并执行 '
+                'adb reverse tcp:8793 tcp:8793（同一端口，二者互斥）。'
+          : 'The relay runs inside the phone\'s own Termux (no PC needed): open '
+                'Termux and run bash /sdcard/Download/ll_relay_ctl.sh start.\n'
+                'It needs the phone\'s proxy to be connected to reach YouTube.\n'
+                'A PC-side relay also works: run python tool/youtube_relay.py with '
+                'adb reverse tcp:8793 tcp:8793 (same port — the two are mutually exclusive).';
 
   // ------------------------------------------------------- ai tutor ------
   String get tutorOnlineTitle =>
@@ -490,21 +497,53 @@ class LLStrings {
 
   // --------------------------------------------------------- creation ----
   /// 取源失败时的操作清单。**必须可照着做**，不要写"请重试"这种废话。
-  /// 取源失败时的操作清单。**必须可照着做**，不要写"请重试"这种废话。
   ///
-  /// 三步顺序有讲究：先给最可能奏效的动作（启动中继），再给前提（USB ——
-  /// PC 是借手机的代理出口访问 YouTube 的），最后给一条**完全不需要电脑的
-  /// 替代路径**（B 站链接）：保证用户永远有路可走。
-  String get creationRelayChecklist => _isZh
-      ? '① 电脑上双击 tool\\start_youtube_relay.ps1 —— 它会检查 yt-dlp、\n'
-            '     映射 8793/7892 并启动中继，最后自检一次\n'
-            '② 手机保持 USB 连接：PC 是借手机的代理出口访问 YouTube 的\n'
-            '③ 或者改用 B 站链接 —— 它完全不需要电脑'
-      : '1. On the PC, run tool\\start_youtube_relay.ps1 (checks yt-dlp, maps 8793/7892, starts the relay)\n'
-            '2. Keep the phone on USB — the PC borrows its proxy exit to reach YouTube\n'
-            '3. Or paste a Bilibili link instead: it needs no PC';
+  /// 2026-09-23 起 YouTube 中继默认跑在**手机自己的 Termux** 里，不再依赖
+  /// 电脑，因此清单也分为两种故障，由 [SourceHint] 选择：
+  ///  - [SourceHint.relayDown]：中继没起来 → 去启动它；
+  ///  - [SourceHint.relayBlocked]：中继在跑但拿不到音频 → 去检查代理。
+  /// 两者都给一条**完全不需要代理的替代路径**（B 站链接），保证永远有路可走。
+  String creationRelayChecklist(SourceHint? hint) {
+    if (hint == SourceHint.relayBlocked) {
+      return _isZh
+          ? '① 检查手机的代理是否已连接（设置里确认 VPN/代理正在运行）\n'
+                '     中继自己也要靠它才能访问 YouTube\n'
+                '② 代理正常仍失败 → 多半是 YouTube 的反机器人校验，\n'
+                '     换一个视频或改用 B 站链接试试\n'
+                '③ 或者改用 B 站链接 —— 它完全不需要代理'
+          : '1. Make sure the phone\'s proxy/VPN is actually connected — the relay needs it to reach YouTube\n'
+                '2. If the proxy is fine, YouTube is likely challenging the request: try another video or a Bilibili link\n'
+                '3. Or paste a Bilibili link instead: it needs no proxy at all';
+    }
+    return _isZh
+        ? '① 手机上打开 Termux，粘一行：\n'
+              '     bash /sdcard/Download/ll_relay_ctl.sh start\n'
+              '   （看到 listening on 127.0.0.1:8793 即成功）\n'
+              '② 确认手机的代理已连接 —— 中继要靠它访问 YouTube\n'
+              '③ 或者改用 B 站链接 —— 它完全不需要中继'
+        : '1. Open Termux on the phone and paste:\n'
+              '     bash /sdcard/Download/ll_relay_ctl.sh start\n'
+              '   (success = "listening on 127.0.0.1:8793")\n'
+              '2. Make sure the phone\'s proxy is connected — the relay needs it to reach YouTube\n'
+              '3. Or paste a Bilibili link instead: it needs no relay at all';
+  }
 
   String get creationFailureDetail => _isZh ? '技术细节' : 'Technical detail';
+
+  /// 「识别出的句子太少」时的操作清单。
+  ///
+  /// 这条错误在全项目只有一个抛出点（切句后不足 3 句），所以清单可以写得很确定：
+  /// 按"最可能"排序 —— 视频太短、没人声、再换源。技术细节里带 words/audio
+  /// 两个量，正好能区分这三种（见 creation_controller 的注释）。
+  String get creationTooFewSentencesChecklist => _isZh
+      ? '① 视频是不是太短了？建议选 2 分钟以上、有人连续说话的内容\n'
+            '② 视频里有没有人声？纯音乐 / 只有字幕的画面识别不出句子\n'
+            '③ 换个视频试试；技术细节里的 words / audio 两个数能直接判断：\n'
+            '     audio 很短 → 视频太短；audio 长但 words 极少 → 音频里没人声'
+      : '1. Is the video too short? Pick 2+ minutes of continuous speech\n'
+            '2. Does it contain speech at all? Music-only or caption-only clips yield nothing\n'
+            '3. Try another video; the words/audio numbers in the detail tell you which: '
+            'a tiny audio = too short, a long audio with almost no words = no speech';
 
   String get createLesson => _isZh ? '制作课程' : 'Create Lesson';
   String get creationMenuImport => _isZh ? '导入课程' : 'Import Lesson';
@@ -541,7 +580,9 @@ class LLStrings {
         : 'Source channel unavailable — the link is fine, the audio is not reachable.',
     CreationError.mediaError =>
       _isZh ? '无法处理该媒体文件。' : 'Could not process this media file.',
-    CreationError.asrError => _isZh ? '转写失败。' : 'Transcription failed.',
+    CreationError.asrError => _isZh
+        ? '转写结果不可用 —— 识别出的句子太少，凑不成一课。'
+        : 'Transcription unusable — too few sentences were recognised.',
     CreationError.translationError => _isZh ? '翻译失败。' : 'Translation failed.',
     CreationError.packageError => _isZh ? '打包失败。' : 'Packaging failed.',
     CreationError.storageError =>

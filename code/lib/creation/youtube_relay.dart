@@ -3,16 +3,19 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-/// Client for the PC-side YouTube audio relay (tool/youtube_relay.py).
+/// Client for the YouTube audio relay.
 ///
-/// The phone cannot run yt-dlp (no Python, no PO-token machinery). The PC
-/// can — with its traffic exiting through the phone's VPN via adb forward,
-/// YouTube's PC-IP blacklist no longer applies. The relay streams the audio
-/// back; this pipeline continues exactly as with a local file.
+/// 中继是唯一需要 yt-dlp（Python）的一环，而安卓自身没有 Python，所以它住在
+/// 能跑 Python 的地方。同一份 HTTP 契约有**两个可互换的实现**，都监听
+/// `127.0.0.1:8793`，因此本客户端与 App 配置对两者完全无感：
 ///
-/// Reachability: with the phone plugged in, `adb reverse tcp:8793 tcp:8793`
-/// maps the app's 127.0.0.1:8793 onto the PC relay (default below). A LAN
-/// base URL works equally well.
+///  1. **手机端（默认，不依赖电脑）** —— `tool/termux/ll_relay.py`，跑在手机的
+///     Termux 里，直接用手机自己的网络/代理访问 YouTube。
+///  2. **电脑端（可选）** —— `tool/youtube_relay.py`，配 `adb reverse
+///     tcp:8793 tcp:8793` 把同一端口映到 PC；也可直接填局域网 IP。
+///
+/// 两者互斥（同一端口只能有一个监听者）：手机端中继在跑时不要再做 8793 的
+/// adb reverse，否则设备侧端口被占用，手机端中继会绑定失败。
 class YouTubeRelayClient {
   YouTubeRelayClient({required this.baseUrl, http.Client? client})
     : _client = client ?? http.Client();

@@ -60,7 +60,6 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-
 # objective_c 9.6.x uses Architecture.arm64e (native assets API) which is not
 # available in the bundled code_assets of Dart 3.13.3 — its hook fails to
 # compile during Android builds. It is pulled in transitively by

@@ -483,8 +483,10 @@ class _CreationFailed extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             // 取源通道不可用 = 用户没做错任何事，必须给他**能照着做**的步骤，
-            // 而不是一句"失败请重试"。
-            if (controller.errorCode == CreationError.sourceUnavailable) ...[
+            // 而不是一句"失败请重试"。识别出的句子太少同理 —— 那也是内容
+            // 层面的问题，不是用户操作错。
+            if (controller.errorCode == CreationError.sourceUnavailable ||
+                controller.errorCode == CreationError.asrError) ...[
               const SizedBox(height: LLSpacing.lg),
               Container(
                 key: const Key('creation-failure-checklist'),
@@ -496,7 +498,9 @@ class _CreationFailed extends StatelessWidget {
                   border: Border.all(color: ll.divider),
                 ),
                 child: Text(
-                  s.creationRelayChecklist,
+                  controller.errorCode == CreationError.asrError
+                      ? s.creationTooFewSentencesChecklist
+                      : s.creationRelayChecklist(controller.sourceHint),
                   style: TextStyle(
                     fontSize: 12.5,
                     height: 1.7,
