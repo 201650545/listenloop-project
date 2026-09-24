@@ -39,6 +39,12 @@ enum StudyComponent {
   /// 形态纠错展示 —— 只展示正确形态，**不判开放答案**（v1 边界）。
   morphologyNote,
 
+  /// AI 出题：原语境理解 + 新语境产出（10 号 §五 / §6.2 白名单第 5 项）。
+  ///
+  /// **不在 planner 的本地规则里出现** —— AI 可用性只有 UI 层知道；
+  /// 入口是生词本管理页的「AI 检查」，执行页在 AI 不可用时降级为跳过。
+  contextTransfer,
+
   /// 纯 SRS 到期待复习。
   srsReview;
 
@@ -268,14 +274,55 @@ class VocabularyPlanner {
 ///
 /// 配额沿用 07 号文档的建议：新卡 [newQuota] 张、复习 [reviewQuota] 张 ——
 /// 上限存在的意义是**防复习债滚雪球**，不是省事。
+/// 配额沿用 07 号文档的建议：新卡 [newQuota] 张、复习 [reviewQuota] 张 ——
+/// 上限存在的意义是**防复习债滚雪球**，不是省事。
 class VocabularyReviewQueue {
-  const VocabularyReviewQueue({this.newLimit = newQuota, this.reviewLimit = reviewQuota});
-
   static const int newQuota = 5;
   static const int reviewQuota = 30;
 
   final int newLimit;
   final int reviewLimit;
+
+  /// 07 号 §三.2 弱项优先（差异化卖点）。
+  ///
+  /// 07 原文按「错误率 × 到期权重」排序（弱项类型卡片提前出现）—— 那是
+  /// 句子级卡的口径（音变类型挂句上）；Item 级词卡的对应物：
+  /// * 错误信号 = SRS 遗忘次数 + ease 低 + 练习失败（`VocabularyDrillLog`）
+  /// * 到期权重 = 拖欠天数线性封顶（防止久拖强卡被新弱卡**永久**压住）
+  ///
+  /// 排序只改**出现顺序与配额占用**（>reviewLimit 截断时弱项先占坑），
+  /// 不改队列构成 —— 到期就是到期，弱项不会把没到期的卡拉进来。
+  final bool weaknessFirst;
+
+  const VocabularyReviewQueue({
+    this.newLimit = newQuota,
+    this.reviewLimit = reviewQuota,
+    this.weaknessFirst = true,
+  });
+
+  /// 错误信号分（07 的「错误率」在词卡上的对应物）。
+  ///
+  /// 权重为设计参数（07 原文只给公式未给数值）：一次遗忘 1 分；
+  /// ease 每低 0.1 约 0.1 分（2.5 基线 → 0.5 分，下限 1.3 → 1.7 分）；
+  /// 练习失败每次 0.5、封顶 2 分 —— 防止反复刷同一组件把分刷上天。
+  static double weaknessScore(VocabularyItem item) {
+    final srs = item.srs;
+    var score = 0.0;
+    if (srs != null) {
+      score += srs.lapses * 1.0 + (3.0 - srs.easeFactor);
+    }
+    final failures =
+        (item.drills.where((d) => !d.passed).length.clamp(0, 4)).toDouble() *
+            0.5;
+    return score + failures;
+  }
+
+  /// 到期权重：拖欠越久越急，线性 0~2 封顶（30 天）。
+  static double overdueWeight(DateTime dueAt, DateTime now) {
+    final days = now.difference(dueAt).inMilliseconds / 86400000.0;
+    if (days <= 0) return 0;
+    return (days > 30 ? 30 : days) / 30.0 * 2.0;
+  }
 
   /// 组装本轮复习队列：**先到期、后新卡**。
   ///
@@ -302,7 +349,19 @@ class VocabularyReviewQueue {
       if (srs.isDue(stamp)) due.add(item);
     }
 
-    due.sort((a, b) => a.srs!.dueAt.compareTo(b.srs!.dueAt));
+    if (weaknessFirst) {
+      // 弱项优先（07 §三.2）：错误信号 × 到期权重 组合键降序，
+      // 同分按 dueAt 升序 —— 排序必须稳定可复现。
+      due.sort((a, b) {
+        final ka = weaknessScore(a) + overdueWeight(a.srs!.dueAt, stamp);
+        final kb = weaknessScore(b) + overdueWeight(b.srs!.dueAt, stamp);
+        final byScore = kb.compareTo(ka);
+        if (byScore != 0) return byScore;
+        return a.srs!.dueAt.compareTo(b.srs!.dueAt);
+      });
+    } else {
+      due.sort((a, b) => a.srs!.dueAt.compareTo(b.srs!.dueAt));
+    }
     fresh.sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
     return <VocabularyItem>[...due.take(reviewLimit), ...fresh.take(newLimit)];

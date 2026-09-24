@@ -949,8 +949,9 @@ class ListeningScreenState extends State<ListeningScreen>
                     color: ll.textSecondary,
                     onPressed: _openAiTutor,
                   ),
-                  // 右侧现在有两个图标（听写 + 显示模式），左右槽位成对加宽，
-                  // 否则计数器会偏心且 RenderFlex 溢出。
+                  // 右侧现有三个图标（听写 + more + 显示模式），左右槽位成对
+                  // 加宽且图标紧凑化（3×48 正好顶满 144 —— 不紧凑化则字体
+                  // 缩放下挤压中栏计数器，曾致「总句数」换行被裁）。
                   slotWidth: 144,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -962,6 +963,7 @@ class ListeningScreenState extends State<ListeningScreen>
                         tooltip: LLStrings.of(context).dictation,
                         icon: const Icon(Icons.keyboard_alt_outlined, size: 19),
                         color: ll.textSecondary,
+                        visualDensity: VisualDensity.compact,
                         onPressed: _openDictation,
                       ),
                       // 二级菜单：三级开关（生词积累）都收在这里，
@@ -971,19 +973,21 @@ class ListeningScreenState extends State<ListeningScreen>
                         tooltip: LLStrings.of(context).more,
                         icon: const Icon(Icons.more_horiz_rounded, size: 20),
                         color: ll.textSecondary,
+                        visualDensity: VisualDensity.compact,
                         onPressed: _openMoreMenu,
                       ),
                       IconButton(
-                    key: const Key('view-mode-button'),
-                    tooltip: _pageMode
-                        ? LLStrings.of(context).fluidText
-                        : LLStrings.of(context).singlePageText,
-                    icon: Icon(
-                      _pageMode ? Icons.subject : Icons.view_day_outlined,
-                      size: 20,
-                      color: ll.textSecondary,
-                    ),
-                    onPressed: () => setState(() {
+                        key: const Key('view-mode-button'),
+                        tooltip: _pageMode
+                            ? LLStrings.of(context).fluidText
+                            : LLStrings.of(context).singlePageText,
+                        icon: Icon(
+                          _pageMode ? Icons.subject : Icons.view_day_outlined,
+                          size: 20,
+                          color: ll.textSecondary,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => setState(() {
                       if (_pageMode) {
                         // 从单页切回流体时，精准定位到单页中用户浏览的句子
                         if (_transcriptVisibleIndex >= 0 &&

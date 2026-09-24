@@ -46,9 +46,18 @@ class ListeningTopBar extends StatelessWidget {
             // truly centred while leading and trailing sit flush left/right.
             SizedBox(width: slotWidth, child: Center(child: leading)),
             Expanded(
-              child: Center(
+              // 「总句数被挤到下面挡住」修复（2026-09-25 用户反馈）：
+              // 顶栏右侧图标从 2 个变 3 个后槽位吃紧，无防换行约束的
+              // Text 会在宽度不足时 wrap，「/ NN」超出 32 高度被裁。
+              // FittedBox 必须直接吃 Expanded 的 tight 约束 —— 若包一层
+              // Center（loose 约束）它不会缩放（大字体下照旧溢出）。
+              // BoxFit.scaleDown 只缩不放：宽了缩进来，窄了也不放大。
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
                 child: Text(
                   '${_two(displayIndex)} / ${_two(sentenceCount)}',
+                  maxLines: 1,
+                  softWrap: false,
                   style: LLText.counter.copyWith(
                     fontSize: 13,
                     color: ll.textSecondary,

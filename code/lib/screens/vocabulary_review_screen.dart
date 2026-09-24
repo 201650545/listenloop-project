@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../data/ai_governor_service.dart';
 import '../data/vocabulary_store.dart';
 import '../l10n/ll_strings.dart';
 import '../models/vocabulary_model.dart';
@@ -10,6 +11,7 @@ import '../player/just_audio_facade.dart';
 import '../theme/listenloop_theme.dart';
 import '../training/vocabulary_drill.dart';
 import '../training/vocabulary_plan.dart';
+import 'ai_quiz_launcher.dart';
 
 /// 闪卡复习 —— **一个词一张卡**（`EPIC-04` 派生规则 3）。
 ///
@@ -17,14 +19,14 @@ import '../training/vocabulary_plan.dart';
 ///   * 练习页（[StudyComponent]）管"听辨/拼写/形态"的针对性练习；
 ///   * 本页只管**记忆调度**：正面回想到位没有，然后给四档评级。
 ///
-/// 三条与旧闪卡（`AnkiReviewDialog`）的区别：
-///   1. 调度挂在**词条**上，而不是"课程 + 句号"—— 同一个词在两门课出现
-///      也只是一张卡，掌握度能累积；
-///   2. 借的是**原片音频的句轴切片**，不是 TTS 合成音（08 定调红线）；
-///   3. 评级历史与遗忘次数落进 `VocabularyDrillLog` / `VocabularySrs.lapses`，
-///      旧卡根本没有 lapse 字段。
+/// 卡面对齐 03 号 §二 标准的落地状态：
+///   * 正面 = 音频 + 英文挖空句，**零中文** ✅（音变提示待 04 的标注管线，
+///     无数据就不显示 —— 不伪造）；
+///   * 背面 = 目标词 + 完整原句 + 中文释义（唯一中文位）+「AI 考我造句」
+///     与「还原原片现场」两个动作（注入才出现）。
 ///
-/// 本页离线完整可用：调度（SM-2）、卡面渲染、评级落盘都不碰网络。
+/// 本页默认离线完整可用：调度（SM-2）、卡面渲染、评级落盘都不碰网络；
+/// AI 动作只在注入了网关时出现（§5.5 红线：附属失败不得阻塞核心）。
 class VocabularyReviewScreen extends StatefulWidget {
   const VocabularyReviewScreen({
     super.key,
@@ -35,6 +37,8 @@ class VocabularyReviewScreen extends StatefulWidget {
     /// 从今日计划里单点一张卡进来时用这个，避免被整队拖着走。
     this.queueIds,
     this.audioFacade,
+    this.aiGovernorService,
+    this.onOpenOccurrence,
 
     /// 测试缝：注入假门面后不再自建真实播放器。
     this.autoCreateAudioFacade = true,
@@ -46,6 +50,13 @@ class VocabularyReviewScreen extends StatefulWidget {
   final VocabularyStore store;
   final List<String>? queueIds;
   final AudioPlayerFacade? audioFacade;
+
+  /// 背面「AI 考我造句」的通道 —— 可选注入，null 则不显示该按钮。
+  final AiGovernorService? aiGovernorService;
+
+  /// 背面「还原原片现场」—— 由调用方（生词本）负责真正跳转。
+  final void Function(VocabularyOccurrence occurrence)? onOpenOccurrence;
+
   final bool autoCreateAudioFacade;
   final DateTime? now;
 
@@ -338,6 +349,73 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
                         );
                       },
                     ),
+                    // 03 号 §二 背面的两个动作（注入才出现，缺省无按钮 ——
+                    // 附属动作不阻塞评级主流程）。
+                    if (widget.aiGovernorService != null ||
+                        (widget.onOpenOccurrence != null &&
+                            occurrence != null)) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          if (widget.aiGovernorService != null)
+                            TextButton.icon(
+                              key: Key('review-ai-quiz-${item.id}'),
+                              onPressed: () => _openAiQuiz(item),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 2,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              icon: Icon(
+                                Icons.auto_awesome_outlined,
+                                size: 15,
+                                color: ll.textPrimary,
+                              ),
+                              label: Text(
+                                s.reviewAiQuizAction,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: ll.textPrimary,
+                                ),
+                              ),
+                            ),
+                          if (widget.onOpenOccurrence != null &&
+                              occurrence != null) ...[
+                            const SizedBox(width: 10),
+                            TextButton.icon(
+                              key: Key('review-open-scene-${item.id}'),
+                              onPressed: () =>
+                                  widget.onOpenOccurrence!(occurrence),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 2,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              icon: Icon(
+                                Icons.movie_outlined,
+                                size: 15,
+                                color: ll.textPrimary,
+                              ),
+                              label: Text(
+                                s.reviewOpenSceneAction,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: ll.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
                   ],
                 ],
               ),
@@ -390,6 +468,21 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
         ],
       ),
     );
+  }
+
+  /// 背面「AI 考我造句」（03 号 §二 ai-actions）—— 打开单卷 AI 检查。
+  Future<void> _openAiQuiz(VocabularyItem item) async {
+    final governor = widget.aiGovernorService;
+    if (governor == null) return;
+    await openAiQuizScreen(
+      context: context,
+      store: widget.store,
+      item: item,
+      governor: governor,
+      audioFacade: widget.audioFacade,
+      autoCreateAudioFacade: widget.audioFacade == null,
+    );
+    if (mounted) setState(() {}); // 回来后刷新 SRS 行（检查可能新增了 drill 记录）
   }
 
   Widget _ratingButton(

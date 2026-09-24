@@ -277,11 +277,19 @@ class AiGovernorService extends ChangeNotifier {
   /// Reviews an Anki card using SM-2 algorithm.
   Future<void> reviewAnkiCard(String cardId, AnkiRating rating) async {
     final index = _ankiCards.indexWhere((c) => c.id == cardId);
-    if (index >= 0) {
-      _ankiCards[index] = _ankiCards[index].applyRating(rating);
-      notifyListeners();
-      await _saveAnkiCardsToDisk();
-    }
+    if (index == -1) return;
+    _ankiCards[index] = _ankiCards[index].applyRating(rating);
+    await _saveAnkiCardsToDisk();
+    notifyListeners();
+  }
+
+  /// 旧闪卡体系下线（2026-09-25）：新体系 = 生词本 Item 级 SRS。
+  ///
+  /// 清空本地旧卡（调用方应先提供 .apkg 导出 —— 见 library 的旧卡横幅）。
+  Future<void> clearAnkiCards() async {
+    _ankiCards.clear();
+    await _saveAnkiCardsToDisk();
+    notifyListeners();
   }
 
   /// Removes an Anki card.
@@ -688,6 +696,56 @@ class AiGovernorService extends ChangeNotifier {
       }
     }
 
+    throw lastError ??
+        const GroqApiException(
+          type: GroqApiErrorType.serverError,
+          message: '所有备选模型均无响应，请稍后重试。',
+        );
+  }
+
+  /// 通用文本补全（AI 出题等新功能用）—— 复用伴学通道的 endpoint / key /
+  /// model 配置与 fallback 链，但**不带句子上下文**（10 号 §五：题面构造
+  /// 在训练层，不走伴学 persona）。
+  Future<String> completeRaw(
+    String userMessage, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final base = tutorBaseUrl;
+    if (base.isEmpty) {
+      throw const GroqApiException(
+        type: GroqApiErrorType.missingEndpoint,
+        message: '未配置 AI 伴学接口地址，请到设置页填写网关地址。',
+      );
+    }
+    final preferred = tutorModel;
+    if (preferred.isEmpty) {
+      throw const GroqApiException(
+        type: GroqApiErrorType.missingEndpoint,
+        message: '未选择 AI 伴学模型，请到设置页拉取列表并选一个模型。',
+      );
+    }
+
+    final endpoint =
+        Uri.parse('${base.replaceAll(RegExp(r'/+$'), '')}/chat/completions');
+    final chain = <String>[preferred, ...kTutorFallbackModels];
+
+    GroqApiException? lastError;
+    for (final model in chain) {
+      try {
+        return await _requestCompletion(
+          endpoint: endpoint,
+          apiKey: tutorApiKey,
+          model: model,
+          messages: [
+            {'role': 'user', 'content': userMessage},
+          ],
+          timeout: timeout,
+        );
+      } on GroqApiException catch (error) {
+        if (error.type == GroqApiErrorType.invalidKey) rethrow;
+        lastError = error;
+      }
+    }
     throw lastError ??
         const GroqApiException(
           type: GroqApiErrorType.serverError,

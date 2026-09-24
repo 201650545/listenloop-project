@@ -58,6 +58,19 @@ class LLStrings {
   String get vocabLessonMissing =>
       _isZh ? '这门课程已不在本机' : 'That lesson is no longer on this device';
   String get vocabStartLearning => _isZh ? '加入学习' : 'Start learning';
+  String get vocabAiCheck => _isZh ? 'AI 检查是不是真的会' : 'AI check (do I really know it?)';
+  String get vocabExportApkg => _isZh ? '导出 Anki 卡组 (.apkg)' : 'Export Anki deck (.apkg)';
+  String get vocabExportEmpty => _isZh
+      ? '学习队列还是空的 —— 先把候选词加进来'
+      : 'Nothing to export yet — move candidates into the learning queue';
+  String vocabExportDone(int count) =>
+      _isZh ? '已导出 $count 张卡' : 'Exported $count cards';
+  String get vocabExportFailed => _isZh ? '导出失败，请重试' : 'Export failed, please retry';
+  String get legacyCardsClearedTitle => _isZh ? '导出完成' : 'Exported';
+  String get legacyCardsClearedBody => _isZh
+      ? '旧版闪卡已打包为 .apkg，可导入桌面版 Anki / AnkiDroid。是否清除本地旧数据？（新闪卡在生词本里，不受影响）'
+      : 'Legacy cards packed as .apkg — import it into Anki/AnkiDroid. Clear local legacy data? (The new flashcards in the vocabulary book are untouched.)';
+  String get legacyCardsClearYes => _isZh ? '清除旧数据' : 'Clear legacy data';
   String get vocabMarkKnown => _isZh ? '标记已掌握' : 'Mark known';
   String get vocabIgnore => _isZh ? '忽略' : 'Ignore';
   String get vocabDelete => _isZh ? '删除词条' : 'Delete';
@@ -190,6 +203,10 @@ class LLStrings {
   String get reviewStart => _isZh ? '复习' : 'Review';
   String get reviewFrontHint =>
       _isZh ? '先回想，再翻面' : 'Recall first, then flip';
+  String get reviewAiQuizAction =>
+      _isZh ? '让 AI 考我造句' : 'Let AI quiz me';
+  String get reviewOpenSceneAction =>
+      _isZh ? '还原原片现场' : 'Back to the scene';
 
   String reviewProgress(int current, int total) =>
       _isZh ? '第 $current / $total 张' : '$current / $total';
@@ -220,6 +237,38 @@ class LLStrings {
   String get drillUncertainNote => _isZh
       ? '对齐不可靠，只给整体结果'
       : 'Alignment unreliable — overall result only';
+
+  // ------------------------------------------------------- ai drill ----
+  // AI 出题（10 号 §五）。纪律：AI 失败必须可跳过；判定文案如实，
+  // 不发明「掌握度 83%」这类数字。
+  String get drillAiTitle => _isZh ? 'AI 检查：真的会了吗' : 'AI check';
+  String get drillAiBody => _isZh
+      ? '两道开放题：先说原句里的意思，再用这个词造一个新场景。'
+      : 'Two open questions: the sense in the original sentence, then a new scene.';
+  String get drillAiLoading => _isZh ? '正在出题…' : 'Preparing…';
+  String get drillAiUnavailable => _isZh
+      ? 'AI 出题不可用（离线或未配置）。跳过不影响其它练习。'
+      : 'AI quiz unavailable (offline or not configured). Skipping affects nothing else.';
+  String get drillAiSkip => _isZh ? '跳过' : 'Skip';
+  String get drillAiQ1 => _isZh ? '第 1 题 · 原语境理解' : 'Q1 · In this sentence';
+  String get drillAiQ2 => _isZh ? '第 2 题 · 新语境产出' : 'Q2 · New scene';
+  String get drillAiAnswerHere =>
+      _isZh ? '用中英文都行，写下你的回答…' : 'Answer here (Chinese or English)…';
+  String get drillAiSubmit => _isZh ? '提交回答' : 'Submit answer';
+  String get drillAiGrading => _isZh ? '判卷中…' : 'Grading…';
+  String get drillAiPass => _isZh ? '通过' : 'Pass';
+  String get drillAiPartial => _isZh ? '部分对' : 'Partial';
+  String get drillAiFail => _isZh ? '未通过' : 'Fail';
+  String get drillAiVerdictKnown =>
+      _isZh ? '两题都过：这个词你在两个语境里都能取回并使用。' : 'Both pass: you can retrieve and use this word in two contexts.';
+  String get drillAiVerdictHalf =>
+      _isZh ? '一半一半：义项或产出还没稳，下次复习会再来。' : 'Half-known: sense or production is shaky — it will come back.';
+  String get drillAiVerdictUnknown =>
+      _isZh ? '两题都没过：先回原声，下次重点重练。' : 'Both fail: go back to the audio and redo this next time.';
+  String get drillAiListeningNote => _isZh
+      ? '认识，但原声里还听不稳 —— 听写证据仍失败。'
+      : 'You know it, but your ears still miss it in the audio.';
+  String drillAiReason(String code) => _isZh ? '原因：$code' : 'Reason: $code';
 
   String drillProgress(int current, int total) =>
       _isZh ? '第 $current / $total 步' : 'Step $current / $total';

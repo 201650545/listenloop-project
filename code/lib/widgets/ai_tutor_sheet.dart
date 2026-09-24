@@ -6,7 +6,6 @@ import '../models/ai_governor_model.dart';
 import '../models/lesson.dart';
 import '../models/sentence.dart';
 import '../preferences/app_preferences.dart';
-import 'anki/anki_review_dialog.dart';
 import 'll_brand.dart';
 
 /// Modal bottom sheet for AI Governor:
@@ -85,7 +84,7 @@ class _AiTutorSheetState extends State<AiTutorSheet>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
 
     _questions = widget.aiGovernorService.generateQuizQuestions(
       lesson: widget.lesson,
@@ -506,7 +505,6 @@ class _AiTutorSheetState extends State<AiTutorSheet>
               tabs: const [
                 Tab(text: '3分钟快测'),
                 Tab(text: 'AI 伴学讨论'),
-                Tab(text: 'Anki 闪卡'),
               ],
             ),
           ),
@@ -524,13 +522,6 @@ class _AiTutorSheetState extends State<AiTutorSheet>
                   dividerColor: dividerColor,
                 ),
                 _buildChatView(
-                  primaryColor: primaryColor,
-                  secondaryColor: secondaryColor,
-                  tertiaryColor: tertiaryColor,
-                  surfaceColor: surfaceColor,
-                  dividerColor: dividerColor,
-                ),
-                _buildAnkiView(
                   primaryColor: primaryColor,
                   secondaryColor: secondaryColor,
                   tertiaryColor: tertiaryColor,
@@ -1353,307 +1344,6 @@ class _AiTutorSheetState extends State<AiTutorSheet>
               child: Icon(Icons.person, size: 14, color: primaryColor),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAnkiView({
-    required Color primaryColor,
-    required Color secondaryColor,
-    required Color tertiaryColor,
-    required Color surfaceColor,
-    required Color dividerColor,
-  }) {
-    final lessonId = widget.lesson.id;
-    final curIndex = widget.currentSentenceIndex;
-    final curSentence = _getCurrentSentence();
-    final card = widget.aiGovernorService.getCardForSentence(lessonId, curIndex);
-    final allLessonCards = widget.aiGovernorService.ankiCardsForLesson(lessonId);
-    final dueCards = widget.aiGovernorService.dueAnkiCards;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Current Sentence Card Status
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: surfaceColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: card != null ? Colors.green.withValues(alpha: 0.4) : dividerColor,
-                width: 1.2,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      card != null ? Icons.check_circle_rounded : Icons.style_outlined,
-                      size: 18,
-                      color: card != null ? Colors.green : primaryColor,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        card != null ? '当前句已加入 Anki 闪卡' : '当前句尚未制卡',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: primaryColor,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (card != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: (card.isMastered ? Colors.purpleAccent : Colors.green)
-                              .withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          card.isMastered ? '🌳 已掌握' : '🌿 复习中 (${card.repetition}次)',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: card.isMastered ? Colors.purpleAccent : Colors.green,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  curSentence.english,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: primaryColor,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  curSentence.chinese,
-                  style: TextStyle(fontSize: 13, color: secondaryColor),
-                ),
-                const SizedBox(height: 14),
-                if (card == null)
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      await widget.aiGovernorService.createAnkiCardFromSentence(
-                        lesson: widget.lesson,
-                        sentence: curSentence,
-                      );
-                      if (mounted) setState(() {});
-                    },
-                    icon: const Icon(Icons.auto_awesome, size: 16),
-                    label: const Text('✨ AI 一键生成 Anki 闪卡 (Cloze 挖空+辨音线索)'),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  )
-                else ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: primaryColor.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '🔤 填空预览: ${card.clozeSentence}',
-                          style: TextStyle(fontSize: 12.5, color: secondaryColor),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '🎧 辨音线索: ${card.phoneticClue}',
-                          style: TextStyle(fontSize: 12, color: tertiaryColor),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '⏱ 间隔: ${card.intervalDays.toStringAsFixed(1)}天 | 难度因子: ${card.easeFactor.toStringAsFixed(2)}',
-                          style: TextStyle(fontSize: 11.5, color: tertiaryColor),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            AnkiReviewDialog.show(
-                              context: context,
-                              cards: [card],
-                              aiGovernorService: widget.aiGovernorService,
-                              onPlaySnippet: (start, end) => widget.onSeekToSentence(card.sentenceIndex),
-                            );
-                          },
-                          icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                          label: const Text('单句复习'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      IconButton(
-                        onPressed: () async {
-                          await widget.aiGovernorService.removeAnkiCard(card.id);
-                          if (mounted) setState(() {});
-                        },
-                        icon: const Icon(Icons.delete_outline, size: 20),
-                        color: Colors.redAccent,
-                        tooltip: '移除闪卡',
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Spaced Repetition Overview
-          Row(
-            children: [
-              Text(
-                '本课闪卡库 (${allLessonCards.length})',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: primaryColor),
-              ),
-              const Spacer(),
-              Text(
-                '今日待复习: ${dueCards.length} 句',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: dueCards.isNotEmpty ? Colors.orangeAccent : tertiaryColor,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          if (allLessonCards.isNotEmpty)
-            ElevatedButton.icon(
-              onPressed: () {
-                final reviewQueue = dueCards.isNotEmpty ? dueCards : allLessonCards;
-                AnkiReviewDialog.show(
-                  context: context,
-                  cards: reviewQueue,
-                  aiGovernorService: widget.aiGovernorService,
-                  onPlaySnippet: (start, end) {
-                    final matchIdx = widget.sentences.indexWhere((s) => s.startMs == start);
-                    if (matchIdx >= 0) {
-                      widget.onSeekToSentence(matchIdx);
-                    }
-                  },
-                );
-              },
-              icon: const Icon(Icons.psychology_outlined, size: 18),
-              label: Text(
-                dueCards.isNotEmpty
-                    ? '🚀 开始今日复习 (${dueCards.length} 张待复习)'
-                    : '🚀 强化复习全课 (${allLessonCards.length} 张闪卡)',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(46),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          const SizedBox(height: 14),
-
-          if (allLessonCards.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Text(
-                  '本课暂无收录闪卡\n在上方点击生成，或在精听界面点击「🎴 闪卡」即可添加',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, height: 1.6, color: tertiaryColor),
-                ),
-              ),
-            )
-          else
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: allLessonCards.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (context, i) {
-                final c = allLessonCards[i];
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: surfaceColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: dividerColor),
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        '#${c.sentenceIndex + 1}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: tertiaryColor,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              c.sentenceText,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: primaryColor),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              c.chineseTranslation,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 11.5, color: secondaryColor),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: c.isDue ? Colors.orange.withValues(alpha: 0.15) : Colors.green.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          c.isDue ? '待复习' : '${c.intervalDays.toStringAsFixed(0)}天后',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: c.isDue ? Colors.orangeAccent : Colors.green,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
         ],
       ),
     );

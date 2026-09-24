@@ -1,4 +1,4 @@
-name: listenloop
+﻿name: listenloop
 description: "ListenLoop - English intensive listening, sentence by sentence (Milestone 1)."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -49,6 +49,7 @@ dependencies:
 
   # M3 从链接创建: bilibili view/playurl APIs and DASH media download.
   http: ^1.2.2
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

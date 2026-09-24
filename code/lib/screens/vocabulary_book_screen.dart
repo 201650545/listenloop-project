@@ -1,11 +1,19 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../anki/apkg_exporter.dart';
+import '../data/ai_governor_service.dart';
 import '../data/vocabulary_store.dart';
 import '../player/audio_player_facade.dart';
 import '../l10n/ll_strings.dart';
 import '../models/vocabulary_model.dart';
 import '../theme/listenloop_theme.dart';
+import '../training/vocabulary_drill.dart';
 import '../training/vocabulary_plan.dart';
+import 'ai_quiz_launcher.dart';
 import 'vocabulary_drill_screen.dart';
 import 'vocabulary_review_screen.dart';
 
@@ -27,10 +35,17 @@ class VocabularyBookScreen extends StatefulWidget {
     required this.store,
     this.onOpenOccurrence,
     this.audioFacade,
+    this.aiGovernorService,
     this.now,
   });
 
   final VocabularyStore store;
+
+  /// AI 检查（10 号 §五「检查我是不是真的会」）的通道 —— **可选注入**。
+  ///
+  /// 本页的默认姿态仍是「不依赖网络与 AI」：不注入时 AI 菜单项不出现，
+  /// 计划与全部管理动作照常可用（§5.5 离线红线）。
+  final AiGovernorService? aiGovernorService;
 
   /// 练习页 / 复习页播原声用的音频门面 —— 测试注入假门面，
   /// 生产传 null 让子页自建（省得只为看列表也起播放器）。
@@ -72,6 +87,14 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
           s.vocabBook,
           style: LLText.pageTitle.copyWith(color: ll.textPrimary, fontSize: 22),
         ),
+        actions: [
+          IconButton(
+            key: const Key('vocab-export-apkg'),
+            tooltip: s.vocabExportApkg,
+            icon: Icon(Icons.ios_share, size: 19, color: ll.textSecondary),
+            onPressed: _exportApkg,
+          ),
+        ],
       ),
       body: ListenableBuilder(
         listenable: widget.store,
@@ -171,6 +194,12 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
                         VocabularyStatus.candidate,
                       ),
                       onDelete: () => _confirmDelete(item),
+                      onAiCheck:
+                          widget.aiGovernorService != null &&
+                              (item.status == VocabularyStatus.learning ||
+                                  item.status == VocabularyStatus.known)
+                          ? () => _startAiCheck(item)
+                          : null,
                     );
                   }, childCount: visible.length * 2 - 1),
                 ),
@@ -199,6 +228,8 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
           store: widget.store,
           queueIds: onlyItemId == null ? null : <String>[onlyItemId],
           audioFacade: widget.audioFacade,
+          aiGovernorService: widget.aiGovernorService,
+          onOpenOccurrence: widget.onOpenOccurrence,
           autoCreateAudioFacade: widget.audioFacade == null,
           now: widget.now,
         ),
@@ -227,6 +258,97 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
       ),
     );
   }
+
+  /// AI 检查（10 号 §五.1：每次一个词，两道开放题）。
+  ///
+  /// 网关与解析接线抽在 [openAiQuizScreen]（复习页背面同款入口共用）。
+  Future<void> _startAiCheck(VocabularyItem item) async {
+    final governor = widget.aiGovernorService;
+    if (governor == null) return;
+    await openAiQuizScreen(
+      context: context,
+      store: widget.store,
+      item: item,
+      governor: governor,
+      audioFacade: widget.audioFacade,
+      autoCreateAudioFacade: widget.audioFacade == null,
+    );
+  }
+
+  /// 导出 .apkg（03 号 §三 契约）—— 学习队列里的全部词条。
+  ///
+  /// 音频用原片句轴切片；无音频的卡 Audio 字段留空（模板自动不显示）。
+  /// 附属功能：失败只给提示，不阻塞本页任何管理动作。
+  Future<void> _exportApkg() async {
+    final s = LLStrings.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final exportable = widget.store.items
+        .where(
+          (i) =>
+              i.status == VocabularyStatus.learning ||
+              i.status == VocabularyStatus.known,
+        )
+        .toList(growable: false);
+    if (exportable.isEmpty) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(s.vocabExportEmpty)),
+      );
+      return;
+    }
+
+    final now = widget.now ?? DateTime.now();
+    final notes = <AnkiExportNote>[];
+    for (final it in exportable) {
+      final occ = it.latestOccurrence;
+      final cloze = occ == null
+          ? null
+          : VocabularyDrillJudge.buildCloze(
+              sentenceText: occ.sentenceText,
+              charStart: occ.charStart,
+              charEnd: occ.charEnd,
+            );
+      notes.add(
+        AnkiExportNote(
+          targetWord: it.surfaceForm,
+          sentenceCloze: cloze?.blanked ?? '',
+          fullSentence: occ?.sentenceText ?? '',
+          sentenceZh: it.chineseGloss ?? '',
+          audioPath: occ?.audioPath,
+        ),
+      );
+    }
+
+    try {
+      final bytes = await buildApkgBytes(
+        notes: notes,
+        now: now,
+        audioFileName: (n) => '${_slug(n.targetWord)}.mp3',
+        audioBytes: (n) {
+          final path = n.audioPath;
+          if (path == null || path.isEmpty) return null;
+          try {
+            return File(path).readAsBytesSync();
+          } catch (_) {
+            return null; // 音频缺失：该卡退化为无音频卡
+          }
+        },
+      );
+      final saved = await FilePicker.platform.saveFile(
+        fileName: 'listenloop_vocab.apkg',
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (saved != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.vocabExportDone(notes.length))),
+        );
+      }
+    } catch (_) {
+      messenger.showSnackBar(SnackBar(content: Text(s.vocabExportFailed)));
+    }
+  }
+
+  static String _slug(String surface) =>
+      surface.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
 
   PlanReason? _reasonFor(List<VocabularyPlanEntry> plan, String itemId) {
     for (final entry in plan) {
@@ -575,6 +697,7 @@ class _VocabularyRow extends StatelessWidget {
     required this.onIgnore,
     required this.onRestore,
     required this.onDelete,
+    this.onAiCheck,
   });
 
   final LLPalette palette;
@@ -586,6 +709,10 @@ class _VocabularyRow extends StatelessWidget {
   final VoidCallback onIgnore;
   final VoidCallback onRestore;
   final VoidCallback onDelete;
+
+  /// AI 检查（10 号 §五）—— null 时不显示菜单项（未注入网关 /
+  /// 候选池与已忽略的词没有检查意义）。
+  final VoidCallback? onAiCheck;
 
   @override
   Widget build(BuildContext context) {
@@ -657,6 +784,8 @@ class _VocabularyRow extends StatelessWidget {
                 switch (value) {
                   case 'learn':
                     onStartLearning();
+                  case 'aiCheck':
+                    onAiCheck?.call();
                   case 'known':
                     onMarkKnown();
                   case 'ignore':
@@ -670,6 +799,11 @@ class _VocabularyRow extends StatelessWidget {
               itemBuilder: (context) => <PopupMenuEntry<String>>[
                 if (item.status != VocabularyStatus.learning)
                   PopupMenuItem(value: 'learn', child: Text(s.vocabStartLearning)),
+                if (onAiCheck != null)
+                  PopupMenuItem(
+                    value: 'aiCheck',
+                    child: Text(s.vocabAiCheck),
+                  ),
                 if (item.status != VocabularyStatus.known)
                   PopupMenuItem(value: 'known', child: Text(s.vocabMarkKnown)),
                 if (item.status == VocabularyStatus.ignored)

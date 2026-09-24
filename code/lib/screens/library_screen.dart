@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../anki/apkg_exporter.dart';
 import '../creation/creation_controller.dart';
 import '../creation/bilibili_source.dart';
 import '../creation/creation_screen.dart';
@@ -19,6 +20,7 @@ import '../l10n/ll_strings.dart';
 import '../lesson/lesson_package_exception.dart';
 import '../lesson/lesson_package_reader.dart';
 import '../models/ai_governor_model.dart';
+import '../models/anki_card_model.dart';
 import '../models/lesson.dart';
 import '../models/vocabulary_model.dart';
 import '../models/sentence.dart';
@@ -26,7 +28,6 @@ import '../preferences/app_preferences.dart';
 import '../storage/lesson_repository.dart';
 import '../theme/listenloop_theme.dart';
 import '../training/vocabulary_plan.dart';
-import '../widgets/anki/anki_review_dialog.dart';
 import '../widgets/library/lesson_continue_card.dart';
 import '../widgets/library/lesson_editorial_row.dart';
 import '../widgets/library/lesson_language_tabs.dart';
@@ -926,6 +927,8 @@ class LibraryScreenState extends State<LibraryScreen> {
         builder: (_) => VocabularyBookScreen(
           store: _vocabularyStore,
           onOpenOccurrence: _openVocabularyOccurrence,
+          // AI 检查通道（可选）：Library 本来就持有 governor（AI 管家卡）。
+          aiGovernorService: _aiGovernorService,
         ),
       ),
     );
@@ -1019,28 +1022,7 @@ class LibraryScreenState extends State<LibraryScreen> {
         LLSpacing.sm,
       ),
       child: InkWell(
-        onTap: () {
-          final queue = dueCards.isNotEmpty ? dueCards : cards;
-          AnkiReviewDialog.show(
-            context: context,
-            cards: queue,
-            aiGovernorService: _aiGovernorService,
-            onPlaySnippet: (start, end) async {
-              if (queue.isNotEmpty) {
-                final card = queue.first;
-                final items = _items ?? [];
-                final target = items.firstWhere(
-                  (it) => it.lesson.id == card.lessonId,
-                  orElse: () => items.first,
-                );
-                final data = await widget.repository.getLessonWithSentences(target.lesson.id);
-                if (data != null && widget.onOpenLesson != null) {
-                  widget.onOpenLesson!(target, data.sentences);
-                }
-              }
-            },
-          );
-        },
+        onTap: () => _exportLegacyAnkiCards(cards),
         borderRadius: BorderRadius.circular(10),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1058,7 +1040,7 @@ class LibraryScreenState extends State<LibraryScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Anki · AI 艾宾浩斯复习',
+                      '旧版闪卡 · 导出到 Anki',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -1068,8 +1050,10 @@ class LibraryScreenState extends State<LibraryScreen> {
                     const SizedBox(height: 2),
                     Text(
                       dueCards.isNotEmpty
-                          ? '今日待复习 ${dueCards.length} 句 · 点击开启强化'
-                          : '全库已收录 ${cards.length} 句 · 记忆曲线保持良好',
+                          ? '全库 ${cards.length} 句（${
+                              dueCards.length
+                            } 张到期）· 旧体系已下线，点击导出 .apkg'
+                          : '全库已收录 ${cards.length} 句 · 旧体系已下线，点击导出 .apkg',
                       style: TextStyle(fontSize: 11, color: ll.textTertiary),
                     ),
                   ],
@@ -1079,16 +1063,15 @@ class LibraryScreenState extends State<LibraryScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: (dueCards.isNotEmpty ? Colors.orangeAccent : Colors.green)
-                      .withValues(alpha: 0.15),
+                  color: Colors.green.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  dueCards.isNotEmpty ? '待复习' : '已就绪',
+                  '导出',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: dueCards.isNotEmpty ? Colors.orangeAccent : Colors.green,
+                    color: Colors.green,
                   ),
                 ),
               ),
@@ -1099,6 +1082,85 @@ class LibraryScreenState extends State<LibraryScreen> {
         ),
       ),
     );
+  }
+
+  /// 旧闪卡的出路：转成 .apkg（复用 [buildApkgBytes]，与生词本导出同一
+  /// 管线），导出成功后询问是否清除本地旧数据。
+  ///
+  /// 字段映射：clozeWord → Target_Word，sentenceText → Full_Sentence_EN，
+  /// chineseTranslation → Sentence_ZH（03 卡面：中文唯一中文位）。
+  Future<void> _exportLegacyAnkiCards(List<AnkiCard> cards) async {
+    final s = LLStrings.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final notes = <AnkiExportNote>[
+        for (final card in cards)
+          AnkiExportNote(
+            targetWord: card.clozeWord,
+            sentenceCloze: card.clozeWord.isEmpty
+                ? card.sentenceText
+                : card.sentenceText.replaceFirst(card.clozeWord, '____'),
+            fullSentence: card.sentenceText,
+            sentenceZh: card.chineseTranslation,
+            audioPath: card.audioPath,
+          ),
+      ];
+      final bytes = await buildApkgBytes(
+        notes: notes,
+        now: DateTime.now(),
+        audioFileName: (n) =>
+            'legacy_${n.targetWord.hashCode.abs() % 100000000}.mp3',
+        audioBytes: (n) {
+          final path = n.audioPath;
+          if (path == null || path.isEmpty) return null;
+          try {
+            return File(path).readAsBytesSync();
+          } catch (_) {
+            return null;
+          }
+        },
+      );
+      final saved = await FilePicker.platform.saveFile(
+        fileName: 'listenloop_legacy_cards.apkg',
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (saved == null || !mounted) return;
+
+      final clear = await showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          final dialogLl = ctx.ll;
+          return AlertDialog(
+          backgroundColor: dialogLl.surface,
+          title: Text(s.legacyCardsClearedTitle,
+              style: const TextStyle(fontSize: 16)),
+          content: Text(
+            s.legacyCardsClearedBody,
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.5,
+              color: dialogLl.textSecondary,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(s.cancel),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(s.legacyCardsClearYes),
+            ),
+          ],
+          );
+        },
+      );
+      if (clear == true) {
+        await _aiGovernorService.clearAnkiCards();
+      }
+    } catch (_) {
+      messenger.showSnackBar(SnackBar(content: Text(s.vocabExportFailed)));
+    }
   }
 
   /// §十三: wordmark, view toggle, and import button.

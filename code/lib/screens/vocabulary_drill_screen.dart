@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -8,6 +9,7 @@ import '../models/vocabulary_model.dart';
 import '../player/audio_player_facade.dart';
 import '../player/just_audio_facade.dart';
 import '../theme/listenloop_theme.dart';
+import '../training/vocabulary_ai_drill.dart';
 import '../training/vocabulary_drill.dart';
 import '../training/vocabulary_plan.dart';
 
@@ -25,6 +27,8 @@ class VocabularyDrillScreen extends StatefulWidget {
     required this.itemId,
     required this.components,
     this.audioFacade,
+    this.loadAiQuiz,
+    this.judgeAiAnswer,
 
     /// 测试缝：注入一个不触真实音频栈的门面。
     this.autoCreateAudioFacade = true,
@@ -39,6 +43,18 @@ class VocabularyDrillScreen extends StatefulWidget {
   final List<StudyComponent> components;
 
   final AudioPlayerFacade? audioFacade;
+
+  /// AI 出题的取题回调（10 号 §五）。null = AI 不可用 → 该步显示可跳过，
+  /// **不得阻塞其它步骤**（§5.5 离线红线）。由调用方接网关并注入。
+  final Future<AiQuiz> Function(VocabularyItem item)? loadAiQuiz;
+
+  /// 开放答案的判卷回调（返回结构化 pass/partial/fail + reasonCode，
+  /// §5.4 —— 绝不让 LLM 给「掌握度」数字）。
+  final Future<AiAnswerJudgement> Function({
+    required AiQuiz quiz,
+    required int questionIndex,
+    required String answer,
+  })? judgeAiAnswer;
 
   /// false 时不自动创建真实音频门面（widget 测试用）。
   final bool autoCreateAudioFacade;
@@ -64,6 +80,16 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
   int _step = 0;
   DrillOutcome? _outcome;
   bool _revealed = false;
+
+  // AI 出题（contextTransfer）状态机：
+  // loading → q1 → q1 判定 → q2 → q2 判定 → verdict；任何网络/解析失败 → 可跳过。
+  AiQuiz? _aiQuiz;
+  String? _aiError;
+  bool _aiLoading = false;
+  int _aiQuestion = 0;
+  AiAnswerJudgement? _aiQ1Verdict;
+  AiAnswerJudgement? _aiQ2Verdict;
+  bool _aiGrading = false;
 
   @override
   void initState() {
@@ -150,7 +176,11 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
       passed: outcome.passed,
       detail: outcome.detail,
     );
+    _advance();
+  }
 
+  /// 只步进不落盘 —— AI 出题的两道题各自落盘，收尾用这个。
+  void _advance() {
     if (_step + 1 >= _steps.length) {
       Navigator.of(context).pop(true);
       return;
@@ -245,6 +275,8 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
         return _buildCloze(s, ll, item);
       case StudyComponent.morphologyNote:
         return _buildMorphology(s, ll, item);
+      case StudyComponent.contextTransfer:
+        return _buildAiQuiz(s, ll, item);
       case StudyComponent.srsReview:
         // 不该出现在这里（构造时已过滤）—— 给一句诚实的话而不是空白页
         return Text(
@@ -252,6 +284,262 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
           style: TextStyle(fontSize: 13, color: ll.textTertiary),
         );
     }
+  }
+
+  // ----------------------------------------------------------- AI 出题
+
+  bool _aiKickStarted = false;
+
+  /// 进入该步时发起一次取题（build 中触发但用 flag 防重复）。
+  void _kickOffAiQuiz(VocabularyItem item) {
+    if (_aiKickStarted) return;
+    _aiKickStarted = true;
+    final loader = widget.loadAiQuiz;
+    if (loader == null) {
+      _aiError = LLStrings.of(context).drillAiUnavailable;
+      return;
+    }
+    _aiLoading = true;
+    scheduleMicrotask(() async {
+      try {
+        final quiz = await loader(item);
+        if (mounted) {
+          setState(() {
+            _aiQuiz = quiz;
+            _aiLoading = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _aiLoading = false;
+            _aiError = LLStrings.of(context).drillAiUnavailable;
+          });
+        }
+      }
+    });
+  }
+
+  /// 听写证据（§5.3 的 listening 维度）：出现过可靠的听写错误即视为未稳。
+  bool get _listeningEvidenceFailed => (_item?.occurrences ?? const []).any(
+    (o) => o.dictationDiffType != null && !o.uncertain,
+  );
+
+  Future<void> _submitAiAnswer(String answer) async {
+    final quiz = _aiQuiz;
+    final judge = widget.judgeAiAnswer;
+    if (quiz == null || judge == null || _aiGrading) return;
+    setState(() => _aiGrading = true);
+    try {
+      final verdict = await judge(
+        quiz: quiz,
+        questionIndex: _aiQuestion,
+        answer: answer,
+      );
+      final stage = _aiQuestion == 0 ? 'recognition' : 'production';
+      widget.store.recordDrill(
+        itemId: widget.itemId,
+        component: StudyComponent.contextTransfer.name,
+        passed: verdict.verdict == AiVerdict.pass,
+        detail: jsonEncode({
+          'stage': stage,
+          'verdict': verdict.verdict.name,
+          'reasonCode': verdict.reasonCode,
+          'answer': answer.trim(),
+        }),
+      );
+      if (!mounted) return;
+      setState(() {
+        if (_aiQuestion == 0) {
+          _aiQ1Verdict = verdict;
+          _aiQuestion = 1;
+        } else {
+          _aiQ2Verdict = verdict;
+        }
+        _aiGrading = false;
+        _input.clear();
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _aiGrading = false;
+          _aiError = LLStrings.of(context).drillAiUnavailable;
+        });
+      }
+    }
+  }
+
+  Widget _buildAiQuiz(LLStrings s, LLPalette ll, VocabularyItem item) {
+    _kickOffAiQuiz(item);
+
+    final header = _stepHeader(s, ll, s.drillAiTitle, s.drillAiBody);
+
+    // 不可用：如实说明 + 跳过（§5.5 红线——不得阻塞）。
+    if (_aiError != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          Text(
+            _aiError!,
+            style: TextStyle(fontSize: 13, height: 1.5, color: ll.textSecondary),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.tonal(
+            onPressed: _advance,
+            child: Text(s.drillAiSkip),
+          ),
+        ],
+      );
+    }
+
+    if (_aiLoading || _aiQuiz == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                s.drillAiLoading,
+                style: TextStyle(fontSize: 13, color: ll.textSecondary),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    final quiz = _aiQuiz!;
+    final question = _aiQuestion == 0 ? quiz.contextQuestion : quiz.transferPrompt;
+    final qLabel = _aiQuestion == 0 ? s.drillAiQ1 : s.drillAiQ2;
+    final verdict = _aiQuestion == 0 ? _aiQ1Verdict : _aiQ2Verdict;
+
+    // 两题都判定完：本地映射（§5.3）—— 判定权在 App。
+    if (_aiQ2Verdict != null) {
+      final finalVerdict = masteryVerdict(
+        listeningPass: !_listeningEvidenceFailed,
+        recognitionPass: _aiQ1Verdict!.verdict == AiVerdict.pass,
+        productionPass: _aiQ2Verdict!.verdict == AiVerdict.pass,
+      );
+      final levelText = switch (finalVerdict.level) {
+        MasteryLevel.known => s.drillAiVerdictKnown,
+        MasteryLevel.halfKnown => s.drillAiVerdictHalf,
+        MasteryLevel.unknown => s.drillAiVerdictUnknown,
+      };
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          _aiVerdictCard(ll, s.drillAiQ1, _aiQ1Verdict!),
+          _aiVerdictCard(ll, s.drillAiQ2, _aiQ2Verdict!),
+          const SizedBox(height: 16),
+          Text(
+            levelText,
+            style: TextStyle(fontSize: 14, height: 1.5, color: ll.textPrimary),
+          ),
+          if (finalVerdict.listeningUnstable)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                s.drillAiListeningNote,
+                style: TextStyle(fontSize: 12, height: 1.5, color: ll.textSecondary),
+              ),
+            ),
+          const SizedBox(height: 24),
+          FilledButton(
+            onPressed: _advance,
+            child: Text(s.drillFinish),
+          ),
+        ],
+      );
+    }
+
+    // 答题中。
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        Text(
+          qLabel,
+          style: TextStyle(fontSize: 12, color: ll.textTertiary),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: ll.surface,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            question,
+            style: TextStyle(fontSize: 16, height: 1.5, color: ll.textPrimary),
+          ),
+        ),
+        if (verdict != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: _aiVerdictCard(ll, qLabel, verdict),
+          ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _input,
+          maxLines: 3,
+          enabled: verdict == null && !_aiGrading,
+          style: TextStyle(fontSize: 15, height: 1.5, color: ll.textPrimary),
+          decoration: InputDecoration(
+            hintText: s.drillAiAnswerHere,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            FilledButton(
+              onPressed:
+                  (_aiGrading || verdict != null || _input.text.trim().isEmpty)
+                  ? null
+                  : () => _submitAiAnswer(_input.text),
+              child: Text(_aiGrading ? s.drillAiGrading : s.drillAiSubmit),
+            ),
+            const SizedBox(width: 12),
+            TextButton(
+              onPressed: _aiGrading ? null : _advance,
+              child: Text(s.drillAiSkip),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _aiVerdictCard(LLPalette ll, String label, AiAnswerJudgement verdict) {
+    final text = switch (verdict.verdict) {
+      AiVerdict.pass => LLStrings.of(context).drillAiPass,
+      AiVerdict.partial => LLStrings.of(context).drillAiPartial,
+      AiVerdict.fail => LLStrings.of(context).drillAiFail,
+    };
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: ll.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '$label · $text (${verdict.reasonCode})',
+        style: TextStyle(fontSize: 13, height: 1.5, color: ll.textSecondary),
+      ),
+    );
   }
 
   // ------------------------------------------------------------- 原声回听
