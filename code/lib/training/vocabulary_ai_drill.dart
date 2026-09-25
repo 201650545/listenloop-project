@@ -149,16 +149,22 @@ String buildJudgementPrompt({
 /// * `recognitionPass` —— 第 1 题判定；
 /// * `productionPass` —— 第 2 题判定。
 ///
+/// 可选第 3 题（§5.2 冲突消解）：两题证据冲突（一过一不过）时出一道
+/// 对比/纠错任务，[conflictResolved] 传消解结果；null = 没出第 3 题。
+///
 /// 硬规则（逐条对应 §5.3 表格与 §5.4）：
 /// * **会**：recognition pass AND production pass（原句 + 新场景 = 2 个语境）；
+///   冲突场景下第 3 题通过 = 冲突消解 + 第 3 个语境 → 同样升「会」；
 /// * **不会**：至少两个独立证据失败（两题都 fail）；
-/// * **半会**：其余一切（含冲突、partial）；
+/// * **半会**：其余一切（含冲突未消解、partial）；
 /// * listening 未通过时附加「认识，但原声里还听不稳」的提示位（文案 l10n 给）。
 MasteryVerdict masteryVerdict({
   required bool listeningPass,
   required bool recognitionPass,
   required bool productionPass,
+  bool? conflictResolved,
 }) {
+  final conflicted = recognitionPass != productionPass;
   final failedEvidences = [
     if (!recognitionPass) 1,
     if (!productionPass) 1,
@@ -176,10 +182,53 @@ MasteryVerdict masteryVerdict({
       listeningUnstable: !listeningPass,
     );
   }
+  // 冲突场景：消解任务通过 = 证据补齐（第 3 个语境）→ 升「会」。
+  if (conflicted && conflictResolved == true) {
+    return MasteryVerdict(
+      level: MasteryLevel.known,
+      listeningUnstable: !listeningPass,
+    );
+  }
   return MasteryVerdict(
     level: MasteryLevel.halfKnown,
     listeningUnstable: !listeningPass,
   );
+}
+
+/// 两题证据是否冲突（§5.2 第 3 题的触发条件：一过一不过）。
+bool needsConflictResolution({
+  required bool recognitionPass,
+  required bool productionPass,
+}) =>
+    recognitionPass != productionPass;
+
+/// 构造第 3 题（对比/纠错任务）的生成 prompt（纯函数，可测）。
+String buildConflictPrompt({
+  required AiQuizMaterial material,
+  required AiQuiz quiz,
+  required AiAnswerJudgement q1,
+  required AiAnswerJudgement q2,
+}) {
+  return [
+    'The learner gave CONFLICTING evidence on "${material.surfaceForm}":',
+    'Q1 (sense in original sentence): ${q1.verdict.name} (${q1.reasonCode})',
+    'Q2 (new-scene production): ${q2.verdict.name} (${q2.reasonCode})',
+    'Create ONE contrast/repair task to resolve the conflict:',
+    'either contrast two minimal sentences (right sense vs the confused one), '
+        'or give a broken sentence for the learner to fix.',
+    'Return STRICT JSON only: {"conflictTask": "..."}',
+    'English only, <= 30 words, must be answerable in one open sentence.',
+  ].join('\n');
+}
+
+/// 解析第 3 题题面（JSON {"conflictTask": "..."}）。
+String parseConflictTask(String raw) {
+  final json = _extractJsonObject(raw);
+  final task = (json?['conflictTask'] as String?)?.trim() ?? '';
+  if (task.isEmpty) {
+    throw const AiQuizException('missing conflictTask');
+  }
+  return task;
 }
 
 /// 掌握判定结论（**不直接改词条状态** —— 状态只由显式动作转移，

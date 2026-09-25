@@ -29,6 +29,7 @@ class VocabularyDrillScreen extends StatefulWidget {
     this.audioFacade,
     this.loadAiQuiz,
     this.judgeAiAnswer,
+    this.loadConflictQuiz,
 
     /// 测试缝：注入一个不触真实音频栈的门面。
     this.autoCreateAudioFacade = true,
@@ -55,6 +56,14 @@ class VocabularyDrillScreen extends StatefulWidget {
     required int questionIndex,
     required String answer,
   })? judgeAiAnswer;
+
+  /// 第 3 题（§5.2 冲突消解）的取题回调 —— 两题证据冲突时才调用；
+  /// null 或抛异常时冲突场景直接落「半会」（可跳过，不阻塞）。
+  final Future<String> Function({
+    required AiQuiz quiz,
+    required AiAnswerJudgement q1,
+    required AiAnswerJudgement q2,
+  })? loadConflictQuiz;
 
   /// false 时不自动创建真实音频门面（widget 测试用）。
   final bool autoCreateAudioFacade;
@@ -89,7 +98,13 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
   int _aiQuestion = 0;
   AiAnswerJudgement? _aiQ1Verdict;
   AiAnswerJudgement? _aiQ2Verdict;
+  AiAnswerJudgement? _aiQ3Verdict;
   bool _aiGrading = false;
+
+  // 第 3 题（§5.2 冲突消解）：两题证据冲突时才进入。
+  bool _aiConflictMode = false;
+  bool _aiConflictLoading = false;
+  String? _aiConflictTask;
 
   @override
   void initState() {
@@ -336,7 +351,11 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
         questionIndex: _aiQuestion,
         answer: answer,
       );
-      final stage = _aiQuestion == 0 ? 'recognition' : 'production';
+      final stage = switch (_aiQuestion) {
+        0 => 'recognition',
+        1 => 'production',
+        _ => 'conflict',
+      };
       widget.store.recordDrill(
         itemId: widget.itemId,
         component: StudyComponent.contextTransfer.name,
@@ -349,12 +368,30 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
         }),
       );
       if (!mounted) return;
+      // q2 判定后：两题证据冲突（一过一不过）且冲突回调可用 → 进第 3 题
+      // （§5.2 冲突消解）；否则直接收卷。
+      if (_aiQuestion == 1) {
+        final q1Pass = _aiQ1Verdict!.verdict == AiVerdict.pass;
+        final q2Pass = verdict.verdict == AiVerdict.pass;
+        if (q1Pass != q2Pass && widget.loadConflictQuiz != null) {
+          setState(() {
+            _aiConflictMode = true;
+            _aiConflictLoading = true;
+            _aiGrading = false;
+            _input.clear();
+          });
+          await _loadConflictTask(quiz, _aiQ1Verdict!, verdict);
+          return;
+        }
+      }
       setState(() {
         if (_aiQuestion == 0) {
           _aiQ1Verdict = verdict;
           _aiQuestion = 1;
-        } else {
+        } else if (_aiQuestion == 1) {
           _aiQ2Verdict = verdict;
+        } else {
+          _aiQ3Verdict = verdict;
         }
         _aiGrading = false;
         _input.clear();
@@ -366,6 +403,35 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
           _aiError = LLStrings.of(context).drillAiUnavailable;
         });
       }
+    }
+  }
+
+  Future<void> _loadConflictTask(
+    AiQuiz quiz,
+    AiAnswerJudgement q1,
+    AiAnswerJudgement q2,
+  ) async {
+    try {
+      final raw = await widget.loadConflictQuiz!(
+        quiz: quiz,
+        q1: q1,
+        q2: q2,
+      );
+      if (!mounted) return;
+      setState(() {
+        _aiConflictTask = parseConflictTask(raw);
+        _aiConflictLoading = false;
+        _aiQuestion = 2;
+      });
+    } catch (_) {
+      // 第 3 题取不到 = 冲突不消解，落「半会」（可跳过语义，§5.5 红线）。
+      if (!mounted) return;
+      setState(() {
+        _aiConflictLoading = false;
+        _aiConflictMode = false;
+        _aiQ2Verdict = q2;
+        _aiQuestion = 1;
+      });
     }
   }
 
@@ -418,16 +484,31 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
     }
 
     final quiz = _aiQuiz!;
-    final question = _aiQuestion == 0 ? quiz.contextQuestion : quiz.transferPrompt;
-    final qLabel = _aiQuestion == 0 ? s.drillAiQ1 : s.drillAiQ2;
-    final verdict = _aiQuestion == 0 ? _aiQ1Verdict : _aiQ2Verdict;
+    final conflictQuestionPending = _aiConflictMode && _aiQ3Verdict == null;
+    final question = switch (_aiQuestion) {
+      0 => quiz.contextQuestion,
+      1 => quiz.transferPrompt,
+      _ => _aiConflictTask ?? '',
+    };
+    final qLabel = switch (_aiQuestion) {
+      0 => s.drillAiQ1,
+      1 => s.drillAiQ2,
+      _ => s.drillAiQ3,
+    };
+    final verdict = switch (_aiQuestion) {
+      0 => _aiQ1Verdict,
+      1 => _aiQ2Verdict,
+      _ => _aiQ3Verdict,
+    };
 
-    // 两题都判定完：本地映射（§5.3）—— 判定权在 App。
-    if (_aiQ2Verdict != null) {
+    // 收卷：两题都判定完、且（无冲突 或 冲突已消解完）→ 本地映射（§5.3）。
+    if (_aiQ2Verdict != null && !(conflictQuestionPending)) {
       final finalVerdict = masteryVerdict(
         listeningPass: !_listeningEvidenceFailed,
         recognitionPass: _aiQ1Verdict!.verdict == AiVerdict.pass,
         productionPass: _aiQ2Verdict!.verdict == AiVerdict.pass,
+        conflictResolved:
+            _aiConflictMode ? _aiQ3Verdict?.verdict == AiVerdict.pass : null,
       );
       final levelText = switch (finalVerdict.level) {
         MasteryLevel.known => s.drillAiVerdictKnown,
@@ -440,6 +521,8 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
           header,
           _aiVerdictCard(ll, s.drillAiQ1, _aiQ1Verdict!),
           _aiVerdictCard(ll, s.drillAiQ2, _aiQ2Verdict!),
+          if (_aiQ3Verdict != null)
+            _aiVerdictCard(ll, s.drillAiQ3, _aiQ3Verdict!),
           const SizedBox(height: 16),
           Text(
             levelText,
@@ -457,6 +540,31 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
           FilledButton(
             onPressed: _advance,
             child: Text(s.drillFinish),
+          ),
+        ],
+      );
+    }
+
+    // 冲突题加载中。
+    if (_aiConflictMode && _aiConflictLoading) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                s.drillAiLoading,
+                style: TextStyle(fontSize: 13, color: ll.textSecondary),
+              ),
+            ],
           ),
         ],
       );

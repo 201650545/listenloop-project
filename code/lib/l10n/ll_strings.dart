@@ -252,6 +252,8 @@ class LLStrings {
   String get drillAiSkip => _isZh ? '跳过' : 'Skip';
   String get drillAiQ1 => _isZh ? '第 1 题 · 原语境理解' : 'Q1 · In this sentence';
   String get drillAiQ2 => _isZh ? '第 2 题 · 新语境产出' : 'Q2 · New scene';
+  String get drillAiQ3 =>
+      _isZh ? '第 3 题 · 消解冲突' : 'Q3 · Resolve the conflict';
   String get drillAiAnswerHere =>
       _isZh ? '用中英文都行，写下你的回答…' : 'Answer here (Chinese or English)…';
   String get drillAiSubmit => _isZh ? '提交回答' : 'Submit answer';

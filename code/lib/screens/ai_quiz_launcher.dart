@@ -62,6 +62,23 @@ Future<void> openAiQuizScreen({
               );
               return AiAnswerJudgement.parse(raw);
             },
+        loadConflictQuiz:
+            ({
+              required AiQuiz quiz,
+              required AiAnswerJudgement q1,
+              required AiAnswerJudgement q2,
+            }) async {
+              final raw = await governor.completeRaw(
+                buildConflictPrompt(
+                  material: material,
+                  quiz: quiz,
+                  q1: q1,
+                  q2: q2,
+                ),
+                timeout: const Duration(seconds: 45),
+              );
+              return raw;
+            },
       ),
     ),
   );

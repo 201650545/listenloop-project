@@ -611,3 +611,15 @@ final existingIndex = _ankiCards.indexWhere(
 ### 17.3 验证
 
 新增 4 项测试（同到期弱项先行 / 练习失败信号 / 拖欠封顶平衡 / 关开关回退），既有队列测试（先到期后新卡、配额截断）在新排序下**语义不变自然通过**。全量 `flutter test` **482 项通过**，`dart analyze lib/ test/` 0 issue。
+
+## 十八、落地记录（2026-09-25 · AI 出题第 3 题：冲突消解）
+
+§5.2「第 3 题 · 仅冲突时」的落地 —— 两题证据冲突（一过一不过）时，出**一道对比/纠错任务**消解冲突。
+
+* **触发条件**：
+eedsConflictResolution(recognitionPass, productionPass) —— 一过一不过；双 fail（=不会）与双 pass 不触发；
+* **题面生成**：uildConflictPrompt 要求 LLM 出最小对比对或改错句（严格 JSON {"conflictTask": ...}，英文 ≤30 词、一句可答）；执行页新回调 loadConflictQuiz 接线（i_quiz_launcher.dart 共用）；
+* **判定映射升级**：masteryVerdict 加 conflictResolved 参数 —— 冲突 + 第 3 题通过 = 第 3 个语境证据补齐 → 升「会」；未通过 / 没出（取题失败自动跳过，§5.5 红线）= 维持半会；双 fail 不受影响；
+* **落盘**：第 3 题以 stage=conflict 进 VocabularyDrillLog，与 recognition/production 同一组件流。
+
+验证：新增 7 项测试（触发条件 / 升会 / 维持半会 / null 兼容 / 双 fail 不变 / prompt 契约 / 解析容错），全量 lutter test **511 项通过**，dart analyze lib/ test/ 0 issue。
