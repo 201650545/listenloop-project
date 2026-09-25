@@ -13,6 +13,8 @@
 ///   3. **SRS 调度挂在 Item 级** —— 一个词一张卡，而不是一句一张卡。
 library;
 
+import '../training/lemma_normalizer.dart';
+
 /// 词条形态：单字/单词，还是一个短语（`take off`）。
 enum VocabularyKind {
   word,
@@ -71,8 +73,7 @@ enum VocabularySource {
 /// 保留词内撇号与连字符（`don't`、`mother-in-law` 不能被切开）。
 ///
 /// 注意：这里**不展开缩写**。展开是听写比对的处理，会破坏用户看到的词形。
-String normalizeTerm(String raw) {
-  var s = raw
+String normalizeTerm(String raw) {  var s = raw
       .toLowerCase()
       .replaceAll('\u2019', "'")
       .replaceAll('\u2018', "'");
@@ -82,6 +83,16 @@ String normalizeTerm(String raw) {
   // 去掉首尾的撇号/连字符残渣
   s = s.replaceAll(RegExp(r"^['\-\s]+|['\-\s]+$"), '');
   return s;
+}
+
+/// 归并键（13 号 §四/§五）：**全库唯一口径** —— 判重、保存、迁移都用它。
+///
+/// * `kind == word`：lemma 还原键（`walked`/`walking`/`walk` 同键）；
+/// * `kind == phrase`：独立键空间（`p:` 前缀）—— 同形如 word "walk" 与
+///   phrase "walk" 互不吞并；词形还原器对多词短语是恒等变换，无碰撞。
+String vocabularyMergeKey(String surface, VocabularyKind kind) {
+  final normalized = normalizeTerm(surface);
+  return kind == VocabularyKind.word ? lemmaKey(normalized) : 'p:$normalized';
 }
 
 /// 一次上下文证据。
@@ -105,6 +116,7 @@ class VocabularyOccurrence {
     this.actual,
     this.uncertain = false,
     this.causeHints = const <String>[],
+    this.lemma,
     required this.createdAt,
   }) : assert(charStart >= 0, 'charStart must be >= 0'),
        assert(charEnd >= charStart, 'charEnd must be >= charStart');
@@ -140,6 +152,14 @@ class VocabularyOccurrence {
   /// 音变**提示**（弱读/连读/失爆/闪音）。永远只是推测，不是声学结论。
   final List<String> causeHints;
 
+  /// 词形归并键（13 号 §三/§四）：原始词形还原后的 lemma。
+  ///
+  /// * `kind == word` 时由存储层写入；phrase 恒为 null（不参与归并）；
+  /// * 旧档迁移前为 null —— 判重按 [normalizeTerm] 兜底；
+  /// * [VocabularyOccurrence.surfaceForm 语义仍由 sentenceText + charStart/End
+  ///   表达]，原始词形永远可回溯（13 号 §三 纪律）。
+  final String? lemma;
+
   final DateTime createdAt;
 
   /// Occurrence 层判重键：同一句、同一字符区间、同一个词，只算一次证据。
@@ -167,6 +187,7 @@ class VocabularyOccurrence {
     'actual': actual,
     'uncertain': uncertain,
     'causeHints': causeHints,
+    'lemma': lemma,
     'createdAt': createdAt.toIso8601String(),
   };
 
@@ -193,6 +214,7 @@ class VocabularyOccurrence {
           for (final h in (json['causeHints'] as List? ?? const <Object?>[]))
             h as String,
         ],
+        lemma: json['lemma'] as String?,
         createdAt:
             DateTime.tryParse((json['createdAt'] ?? '') as String) ??
             DateTime.now(),
@@ -397,6 +419,7 @@ class VocabularyItem {
     this.englishDefinition,
     this.chineseGloss,
     this.aiUsageNote,
+    this.lemma,
     required this.createdAt,
     required this.lastSeenAt,
     List<VocabularyOccurrence>? occurrences,
@@ -417,6 +440,10 @@ class VocabularyItem {
   final String surfaceForm;
 
   final VocabularyKind kind;
+
+  /// 词形归并键缓存（13 号 §四）：`kind == word` 时由存储层写入
+  /// （还原器结果）；phrase 恒为 null；旧档迁移前为 null。
+  final String? lemma;
 
   /// 整体学习状态。**不随单次证据自动升降**，只由显式动作转移。
   final VocabularyStatus status;
@@ -469,8 +496,9 @@ class VocabularyItem {
   int failCount(String component) =>
       drills.where((d) => d.component == component && !d.passed).length;
 
-  /// Item 层判重键：归一化词形。跨课程、跨句子合并同一个词。
-  String get itemKey => normalizeTerm(surfaceForm);
+  /// Item 层判重键：[vocabularyMergeKey] 全库唯一口径 —— 跨课程、跨句子、
+  /// 跨词形合并同一个词；phrase 走独立键空间。
+  String get itemKey => vocabularyMergeKey(lemma ?? surfaceForm, kind);
 
   /// 见到次数恒等于证据条数（派生规则 2）。
   int get seenCount => occurrences.length;
@@ -508,6 +536,7 @@ class VocabularyItem {
     String? englishDefinition,
     String? chineseGloss,
     String? aiUsageNote,
+    String? lemma,
     DateTime? lastSeenAt,
     List<VocabularyOccurrence>? occurrences,
     List<VocabularyDrillLog>? drills,
@@ -521,6 +550,7 @@ class VocabularyItem {
     englishDefinition: englishDefinition ?? this.englishDefinition,
     chineseGloss: chineseGloss ?? this.chineseGloss,
     aiUsageNote: aiUsageNote ?? this.aiUsageNote,
+    lemma: lemma ?? this.lemma,
     createdAt: createdAt,
     lastSeenAt: lastSeenAt ?? this.lastSeenAt,
     occurrences: occurrences ?? this.occurrences,
@@ -537,6 +567,7 @@ class VocabularyItem {
     'englishDefinition': englishDefinition,
     'chineseGloss': chineseGloss,
     'aiUsageNote': aiUsageNote,
+    'lemma': lemma,
     'createdAt': createdAt.toIso8601String(),
     'lastSeenAt': lastSeenAt.toIso8601String(),
     'ankiCardIds': ankiCardIds,
@@ -553,6 +584,7 @@ class VocabularyItem {
     englishDefinition: json['englishDefinition'] as String?,
     chineseGloss: json['chineseGloss'] as String?,
     aiUsageNote: json['aiUsageNote'] as String?,
+    lemma: json['lemma'] as String?,
     createdAt:
         DateTime.tryParse((json['createdAt'] ?? '') as String) ?? DateTime.now(),
     lastSeenAt:

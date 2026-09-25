@@ -623,3 +623,14 @@ eedsConflictResolution(recognitionPass, productionPass) —— 一过一不过�
 * **落盘**：第 3 题以 stage=conflict 进 VocabularyDrillLog，与 recognition/production 同一组件流。
 
 验证：新增 7 项测试（触发条件 / 升会 / 维持半会 / null 兼容 / 双 fail 不变 / prompt 契约 / 解析容错），全量 lutter test **511 项通过**，dart analyze lib/ test/ 0 issue。
+## 十九、落地记录（2026-09-25 · lemma 词形归并）
+
+13 号设计稿四项按推荐拍板（方案 A 导入时归并 / ~180 不规则词表 / 启动时自动迁移 + 快照兜底 / 还原失败保持独立卡）后动工，当日完成。
+
+* **还原器** lib/training/lemma_normalizer.dart（三层：不规则表 → 规则词尾剥离 → 兜底自身，宁缺勿错）；同形歧义词（leaves/lives）按高频义保留一条；
+* **判重口径统一**：ocabularyMergeKey()（model 层顶层函数）—— word 走 lemma 还原键、phrase 走 p: 前缀独立键空间（同形 word "walk" 与 phrase "walk" 互不吞并）；VocabularyItem.itemKey 与迁移分组共用同一口径；
+* **数据模型**：VocabularyItem / VocabularyOccurrence 加 lemma 字段（JSON 向后兼容，旧档 null 兜底）；
+* **一次性迁移** migrateToLemmaV2()：启动时装载后自动跑（幂等标记）；迁移前整包快照进 SharedPreferences（ocab_items_backup_pre_lemma）；主卡 = 最早创建，occurrences / drills / ankiCardIds 全并入（一条不丢），status 取组内最高（全 ignored 保留 ignored），srs 保留 reviews+lapses 更大者，occurrence 逐条回填 lemma；
+* **phrase 恒不参与归并**（§五 红线）。
+
+验证：还原器 31 项（三层表驱动 + 保守边界）+ 迁移 9 项（三卡归并 / 证据不丢 / status / srs / drills / phrase 隔离 / 幂等 / 快照）+ 存量判重回归，全量 lutter test **551 项通过**，dart analyze lib/ test/ 0 issue，已装机。

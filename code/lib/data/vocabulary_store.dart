@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/vocabulary_model.dart';
+import '../training/lemma_normalizer.dart';
 
 /// 生词本存储 —— 两层模型的**判重与聚合**都收在这里。
 ///
@@ -78,6 +79,8 @@ class VocabularyStore extends ChangeNotifier {
       if (!changed) return;
       _reindexCounters();
       notifyListeners();
+      // 13 号 §四：装载后跑一次 lemma 迁移（幂等，打过标记即跳过）。
+      await migrateToLemmaV2();
     } catch (e) {
       debugPrint('[VocabularyStore] load failed (memory-only): $e');
     }
@@ -145,13 +148,23 @@ class VocabularyStore extends ChangeNotifier {
 
   VocabularyItem? itemById(String id) => _items[id];
 
-  /// 按归一化词形查词条（跨课程合并的入口）。
+  /// 按归一化词形查词条（跨课程合并的公开查询口，kind 未知）。
+  ///
+  /// 13 号 §四：三段优先级 —— word 的 lemma 键 → phrase 键空间 →
+  /// 归一化原形兜底。word 命中优先（附属动作以词为中心）。
   VocabularyItem? itemBySurface(String surface) {
-    final key = normalizeTerm(surface);
+    final normalized = normalizeTerm(surface);
+    final wordKey = lemmaKey(normalized);
+    final phraseKey = 'p:$normalized';
+    VocabularyItem? fallback;
     for (final item in _items.values) {
-      if (item.itemKey == key) return item;
+      if (item.itemKey == wordKey) return item;
+      if (fallback == null &&
+          (item.itemKey == phraseKey || item.itemKey == normalized)) {
+        fallback = item;
+      }
     }
-    return null;
+    return fallback;
   }
 
   /// 该位置是否已保存 —— 字幕高亮要用。
@@ -189,13 +202,22 @@ class VocabularyStore extends ChangeNotifier {
   }) {
     final stamp = now ?? DateTime.now();
 
-    // ① Item 层：按归一化词形找已有词条，找到就复用（跨课程合并）
-    var item = itemBySurface(surface);
+    // ① Item 层：按归并键找已有词条（kind 定键空间 —— 13 号 §四/§五）
+    final mergeKey = vocabularyMergeKey(surface, kind);
+    VocabularyItem? item;
+    for (final candidate in _items.values) {
+      if (candidate.itemKey == mergeKey) {
+        item = candidate;
+        break;
+      }
+    }
+    final lemma = kind == VocabularyKind.word ? lemmaKey(surface) : null;
 
     item ??= VocabularyItem(
       id: 'voc_${++_itemSeq}',
       surfaceForm: surface,
       kind: kind,
+      lemma: lemma,
       createdAt: stamp,
       lastSeenAt: stamp,
     );
@@ -228,11 +250,14 @@ class VocabularyStore extends ChangeNotifier {
       actual: actual,
       uncertain: uncertain,
       causeHints: causeHints,
+      lemma: lemma,
       createdAt: stamp,
     );
 
-    // 新生成一条证据时刷新最近见到时间；重复点击不会走到这里
+    // 新生成一条证据时刷新最近见到时间；重复点击不会走到这里。
+    // 主卡的 lemma 缺失（旧档未迁移场景）时顺手补上 —— 保守回填。
     item = item.copyWith(
+      lemma: item.lemma ?? lemma,
       lastSeenAt: stamp,
       occurrences: <VocabularyOccurrence>[...item.occurrences, occurrence],
     );
@@ -484,5 +509,224 @@ class VocabularyStore extends ChangeNotifier {
     }
     _itemSeq = itemMax;
     _occurrenceSeq = occMax;
+  }
+
+  // ------------------------------------------------------------ lemma 迁移
+
+  /// 迁移标记 —— 打过就永不重跑（13 号 §四）。
+  static const String _lemmaMigratedKey = 'listenloop:vocab_lemma_migrated';
+
+  /// 迁移前快照键 —— 出问题整包恢复的兜底。
+  static const String _backupKey = 'listenloop:vocab_items_backup_pre_lemma';
+
+  /// 一次性迁移：按 lemma 归并既有词条（13 号 §四，郭老师 2026-09-25 拍板
+  /// 方案 A + 快照兜底 + 启动时自动）。
+  ///
+  /// * 迁移前把整个 store JSON 快照进 [\_backupKey]；
+  /// * 主卡 = 组内 createdAt 最早者；occurrences / drills 全部并入（不丢证据）；
+  /// * status 取组内最高（known > learning > candidate；ignored 独立保留）；
+  /// * srs 保留 reviews + lapses 更大的一张；
+  /// * 迁移过的旧 occurrence 顺手补 lemma 字段；
+  /// * 返回 true 表示本轮确实迁移了（幂等：打过标记直接 false）。
+  Future<bool> migrateToLemmaV2() async {
+    final sp = _prefs ?? await SharedPreferences.getInstance();
+    _prefs = sp;
+    if (sp.getBool(_lemmaMigratedKey) ?? false) return false;
+
+    if (_items.isNotEmpty) {
+      final snapshot = <String>[
+        for (final item in _items.values) jsonEncode(item.toJson()),
+      ];
+      await sp.setStringList(_backupKey, snapshot);
+    }
+
+    final merged = mergeByLemma(_items.values.toList(growable: false));
+    _items
+      ..clear()
+      ..addEntries([for (final i in merged) MapEntry(i.id, i)]);
+    _reindexCounters();
+    await sp.setBool(_lemmaMigratedKey, true);
+    _schedulePersist();
+    notifyListeners();
+    return true;
+  }
+
+  /// 归并纯函数（13 号 §四 的合并规则，`@visibleForTesting` 供表驱动测试）。
+  @visibleForTesting
+  static List<VocabularyItem> mergeByLemma(List<VocabularyItem> items) {
+    final groups = <String, List<VocabularyItem>>{};
+    for (final item in items) {
+      final key = vocabularyMergeKey(item.surfaceForm, item.kind);
+      (groups[key] ??= <VocabularyItem>[]).add(item);
+    }
+
+    final out = <VocabularyItem>[];
+    for (final entry in groups.entries) {
+      final groupKey = entry.key;
+      final group = entry.value;
+      if (group.length == 1) {
+        out.add(_backfillLemma(group.single));
+        continue;
+      }
+      final sorted = [...group]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final primary = sorted.first;
+
+      var seen = 0;
+      var lapses = 0;
+      VocabularySrs? srs;
+      for (final it in group) {
+        final s = it.srs;
+        if (s == null) continue;
+        if (s.reviews + s.lapses >= seen + lapses) {
+          srs = s;
+          seen = s.reviews;
+          lapses = s.lapses;
+        }
+      }
+
+      final status = _highestStatus(group);
+      final occurrences = <VocabularyOccurrence>[];
+      final usedIds = <String>{};
+      for (final it in sorted) {
+        for (final o in it.occurrences) {
+          var id = o.id;
+          while (usedIds.contains(id)) {
+            id = '${id}m';
+          }
+          usedIds.add(id);
+          occurrences.add(
+            VocabularyOccurrence(
+              id: id,
+              itemId: primary.id,
+              lessonId: o.lessonId,
+              lessonTitle: o.lessonTitle,
+              sentenceId: o.sentenceId,
+              sentenceIndex: o.sentenceIndex,
+              sentenceText: o.sentenceText,
+              startMs: o.startMs,
+              endMs: o.endMs,
+              audioPath: o.audioPath,
+              charStart: o.charStart,
+              charEnd: o.charEnd,
+              source: o.source,
+              dictationDiffType: o.dictationDiffType,
+              expected: o.expected,
+              actual: o.actual,
+              uncertain: o.uncertain,
+              causeHints: o.causeHints,
+              lemma: primary.kind == VocabularyKind.word
+              ? (o.lemma ?? groupKey)
+              : null,
+              createdAt: o.createdAt,
+            ),
+          );
+        }
+      }
+
+      out.add(
+        VocabularyItem(
+          id: primary.id,
+          surfaceForm: primary.surfaceForm,
+          kind: primary.kind,
+          status: status,
+          englishDefinition: _firstNonEmpty(group, (i) => i.englishDefinition),
+          chineseGloss: _firstNonEmpty(group, (i) => i.chineseGloss),
+          aiUsageNote: _firstNonEmpty(group, (i) => i.aiUsageNote),
+          lemma: primary.kind == VocabularyKind.word
+              ? lemmaKey(primary.surfaceForm)
+              : null,
+          createdAt: primary.createdAt,
+          lastSeenAt: group
+              .map((i) => i.lastSeenAt)
+              .reduce((a, b) => a.isAfter(b) ? a : b),
+          occurrences: occurrences,
+          drills: [
+            for (final it in sorted) ...it.drills,
+          ],
+          ankiCardIds: [
+            for (final it in sorted) ...it.ankiCardIds,
+          ],
+          srs: srs,
+        ),
+      );
+    }
+    return out;
+  }
+
+  static String? _firstNonEmpty(
+    List<VocabularyItem> group,
+    String? Function(VocabularyItem) pick,
+  ) {
+    for (final i in group) {
+      final v = pick(i);
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
+  static VocabularyStatus _highestStatus(List<VocabularyItem> group) {
+    var best = VocabularyStatus.candidate;
+    var sawAny = false;
+    for (final i in group) {
+      if (i.status == VocabularyStatus.ignored) continue;
+      sawAny = true;
+      if (_statusRank(i.status) > _statusRank(best)) best = i.status;
+    }
+    // 组内全是 ignored → 保留 ignored（不凭空抬成候选）。
+    return sawAny ? best : VocabularyStatus.ignored;
+  }
+
+  static int _statusRank(VocabularyStatus s) => switch (s) {
+    VocabularyStatus.known => 3,
+    VocabularyStatus.learning => 2,
+    VocabularyStatus.candidate => 1,
+    VocabularyStatus.ignored => 0,
+  };
+
+  static VocabularyItem _backfillLemma(VocabularyItem item) {
+    if (item.kind != VocabularyKind.word) return item;
+    final lemma = lemmaKey(item.surfaceForm);
+    final allTagged = item.occurrences.every((o) => o.lemma != null);
+    if (item.lemma == lemma && allTagged) return item;
+    return VocabularyItem(
+      id: item.id,
+      surfaceForm: item.surfaceForm,
+      kind: item.kind,
+      status: item.status,
+      englishDefinition: item.englishDefinition,
+      chineseGloss: item.chineseGloss,
+      aiUsageNote: item.aiUsageNote,
+      lemma: lemma,
+      createdAt: item.createdAt,
+      lastSeenAt: item.lastSeenAt,
+      occurrences: [
+        for (final o in item.occurrences)
+          VocabularyOccurrence(
+            id: o.id,
+            itemId: o.itemId,
+            lessonId: o.lessonId,
+            lessonTitle: o.lessonTitle,
+            sentenceId: o.sentenceId,
+            sentenceIndex: o.sentenceIndex,
+            sentenceText: o.sentenceText,
+            startMs: o.startMs,
+            endMs: o.endMs,
+            audioPath: o.audioPath,
+            charStart: o.charStart,
+            charEnd: o.charEnd,
+            source: o.source,
+            dictationDiffType: o.dictationDiffType,
+            expected: o.expected,
+            actual: o.actual,
+            uncertain: o.uncertain,
+            causeHints: o.causeHints,
+            lemma: o.lemma ?? lemma,
+            createdAt: o.createdAt,
+          ),
+      ],
+      drills: item.drills,
+      ankiCardIds: item.ankiCardIds,
+      srs: item.srs,
+    );
   }
 }
