@@ -240,7 +240,7 @@ AI 返回的是 `skill state + reasonCodes + recommendedComponentIds`，**不是
 
 > ⚠️ **一个重要教训**：参考稿只能当**证据**，不能当**圣旨**。本次差异中 `just as obsessed`（课程包）vs `just obsessed`（参考稿）—— **课程包才是对的**，参考稿漏了一个 `as`。修正前必须逐条人工确认，不可脚本盲改。
 >
-> 校验工具：官方逐字稿 `D:/Work/gh-sync/_teded_official_transcript.txt` + difflib 词级对齐脚本。同法可用于质检**任何**新导入课程 —— 建议把「导入后转写质检」做成制课管线的固定关卡。
+> 校验工具：官方逐字稿 `D:/Work/AI精听训练器/05_GPT问诊台/_teded_official_transcript.txt` + difflib 词级对齐脚本。同法可用于质检**任何**新导入课程 —— 建议把「导入后转写质检」做成制课管线的固定关卡。
 
 ---
 
@@ -634,3 +634,328 @@ eedsConflictResolution(recognitionPass, productionPass) —— 一过一不过�
 * **phrase 恒不参与归并**（§五 红线）。
 
 验证：还原器 31 项（三层表驱动 + 保守边界）+ 迁移 9 项（三卡归并 / 证据不丢 / status / srs / drills / phrase 隔离 / 幂等 / 快照）+ 存量判重回归，全量 lutter test **551 项通过**，dart analyze lib/ test/ 0 issue，已装机。
+---
+
+## 二十、成熟项目生词本构建策略调研（2026-09-25）
+
+> **本节为恢复版。** 原文因一次误操作整文件覆盖而丢失，依据 `开发日志.md`（2026-09-25 · 生词本构建策略调研）条目逐条重建。调研对象、五条规律、现状对照、优先级、pub.dev 实测五项均为原文事实；若日后找回原文，请以原文替换本节。
+
+### 20.1 调研对象（四类）
+
+| 类别 | 代表 |
+|:--|:--|
+| 挖词产品 | VocabSieve / Migaku / Clozemaster |
+| 阅读型 | LingQ / Readlang |
+| SRS 调度 | Anki / FSRS |
+| Anki 生态 | MorphMan / genanki / vocabsieve-addon |
+
+### 20.2 五条规律（跨项目共识）
+
+1. **「词」与「上下文」必须两层** —— 所有挖词项目的共识（对照 §十三 两层模型）。
+2. **SRS 挂词级不挂句级** —— MorphMan 生态的判重键是词形（不是句子）。
+3. **SM-2 是底线，FSRS 是 2022 年起的标准**：
+   * SM-2：ease 初值 2.5、下限 1.3；Again −0.2 / Hard −0.15 / Good 不变 / Easy +0.15。
+   * FSRS：21 参数神经网络、stability/difficulty 双变量、显式目标保持率（desired retention）。
+   * **但 FSRS 冷启动差** —— 几百条复习历史之前，用 SM-2 更稳。
+4. **词频只参与「学什么」的排序/过滤，不参与「什么时候复习」的间隔数学**（对应 §21.3 三条硬边界第 1 条）。
+5. **已知词反哺内容（LingQ/Migaku 的做法）与 08「听优先」冲突** —— 本轮不做内容反哺，只做非破坏式视觉弱化（见 §23.1）。
+
+### 20.3 现状对照（ListenLoop vs 成熟项目）
+
+已达成熟项目水准的部分：两层模型 / 判重 / 点词保存 / SRS 挂载 / 弱项优先。
+
+**真差距只有两个：**
+1. **完全无词频数据** —— 全 lib 目录搜 `frequency/freq/词频/COCA/BNC/zipf` 零命中（P0 已补上，见 §21）；
+2. **SRS 仍是 SM-2 简化版**（P1 已替换为 FSRS，见 §22）。
+
+### 20.4 优先级（本轮定调）
+
+* **P0** 词频排序/过滤 —— 打包离线词频表作 asset，纯函数读取器，**不覆盖证据模型**。→ ✅ 已完成（§21）
+* **P1** SRS 升 FSRS。→ ✅ 已完成（§22）
+* **P2** 已知词反哺 —— 原判「暂缓」，本轮改做**非破坏式**视觉弱化以守 08 红线。→ ✅ 已完成（§23.1）
+* **P3** Anki 导出（可选）。→ ✅ 已完成守卫（§23.2）
+
+### 20.5 pub.dev 实测（前置条件成立，P1 才敢启动）
+
+* `fsrs` **v2.0.1**，MIT，Flutter 全平台（Android/iOS/macOS/Windows/Linux/Web）。
+* 22 likes / 6.27k 下载，为 `open-spaced-repetition/py-fsrs@6fd0857` 的 **Dart 移植**。
+* API：`Scheduler(parameters: 21权重, desiredRetention, learningSteps, relearningSteps, maximumInterval, enableFuzzing)` → `reviewCard(card, rating)` 返回 `(card, reviewLog)`；`Card` / `ReviewLog` / `Scheduler` 支持 `toMap` / `fromMap`。
+* **结论**：可直接引入，P1 不再依赖 `fsrs-rs-dart` 是否存在。
+
+---
+
+## 二十一、落地记录（2026-09-25 · P0 离线词频表 + 候选池排序）
+
+对应 §20.4 的 P0。**只做了词频**，SRS 升级（P1）与已知词反哺（P2）留待后续。
+
+### 21.1 词频数据源
+
+* **NGSL 1.01（New General Service List）官方发布**：`antdurrant/word.lists` 仓库的 `NGSL+1.01+with+SFI.xlsx`（4,046,430B）。
+* 从 `Wordlist ∈ {1 - NGSL, 2 - Sup}` 筛出 lemma + rank，得 **2801 条**（rank 1 = `the`，rank 2801 = `thirst`）。
+* 落盘 `D:/listenloop/assets/data/ngsl3000.tsv`（UTF-8，`词形\trank`，36,373B），`pubspec.yaml` 已注册。
+* **关键认识**：NGSL 是 **lemma 表**（只存原形，`walked`/`walking` 不在表内，`walk` 在）。查询必须两步——先按 lemma 归一化键查，未命中再查归一化原形兜底（`found` 在表里是独立条目，`lemmaKey('found')='find'` 会漏，必须兜住）。
+
+### 21.2 交付文件
+
+| 文件 | 职责 |
+|:--|:--|
+| `lib/training/word_frequency.dart` | **纯函数**读取器：`parse()` / `rankOf()` / `isHighFrequency()` / `isLowFrequency()` / `priorityOf()`。零依赖、离线、解析一次后 O(1) Map 查询。 |
+| `lib/data/word_frequency_loader.dart` | **唯一碰 `rootBundle` 的 Flutter 层**：`WordFrequencyHolder.load()`，失败静默降级为空表；`inject()` 供测试。 |
+| `lib/training/vocabulary_plan.dart` | `build()` 新增可选 `WordFrequency? frequency`。 |
+| `lib/screens/vocabulary_book_screen.dart` | build 时读 `WordFrequencyHolder.current` 传给 planner。 |
+| `lib/screens/root_shell.dart` | `initState` 里 `unawaited(WordFrequencyHolder.load())`。 |
+| `assets/data/ngsl3000.tsv` | 2801 条 NGSL 词频。 |
+| `test/training/word_frequency_test.dart` | 读取器 11 项测试。 |
+| `test/data/word_frequency_loader_test.dart` | loader 4 项测试（含真实 asset 冒烟）。 |
+| `test/training/vocabulary_plan_test.dart` | 新增「词频排序」4 项测试。 |
+
+### 21.3 排序规则（P0 边界，已写进 planner doc 注释）
+
+* **只作用于候选池之间**：低频优先（`priorityOf` = NGSL rank，未登录词取 1500 中间值）。
+* 同优先级回退「最近见到」；非候选词保持原顺序。
+* **三条硬边界**：
+  1. 词频**不参与** SRS 间隔数学——不动 `dueAt` / `easeFactor` / `intervalDays`；
+  2. 词频**不覆盖**听写证据规则——高频词听错了照样出「原声回听」（听不清高频词恰恰是听力问题）；
+  3. 词频**不改**队列构成——到期的就是到期，低频词不会把没到期的卡拉进来。
+* 传 `null` 时**行为完全不变**（向后兼容，现有测试不受影响）。
+
+### 21.4 未登录词的优先级为什么取 1500（中间偏前）
+
+NGSL 只覆盖核心高频词。**未登录 ≠ 低频**：它可能是 COCA/BNC 前 5 万里的普通词（该先练），也可能是专有名词（不该练）。给中间值既不让生僻词霸榜、也不把它们压到底（压底反而漏掉真正该练的词）。
+
+### 21.5 验证
+
+* `flutter analyze lib/ test/`：0 issue。
+* 新增测试 19 项（读取器 11 + planner 4 + loader 4），**全部通过**。
+* 全量 `flutter test`：**577 项通过**（基线 554 + 新增 23，无回归）。
+### 21.6 装机验证（2026-09-25 · release APK + adb 真机确认）
+
+* **构建**：`flutter build apk --release`（3 ABI，~139MB）。解包校验 `assets/data/ngsl3000.tsv` **已打进 APK**。
+* **装机**：`adb install -r` → Success；`MainActivity` 进入 `topResumedActivity`，PID 存活，logcat 无 crash。release 版不可 debug、无 `run-as`。
+* **词频排序真机验证**（`ted-ed-greek-music` 第 15 句 `but the ancient Greeks saw these disciplines as more than just school subjects.`）：
+
+  | 步骤 | 操作 | 结果 |
+  |---|---|---|
+  | 1 | 更多菜单开启「生词积累模式」 | 开关 `checked=true`，字幕逐词可点 |
+  | 2 | 点 `but` | 底部「✓ 已存 but」，字幕该词带下划线 |
+  | 3 | 点 `disciplines` | 底部「✓ 已存 disciplines」，同样下划线 |
+  | 4 | 课程页看「生词本」入口 | 显示「候选池 2 个词」 |
+  | 5 | 进生词本 | 「候选池 2」列表：**`disciplines` 在上，`but` 在下** |
+  | 6 | 看「今日计划」 | **为空** |
+
+* **判定**：
+  * `disciplines` → NGSL `discipline` rank **1850**（低频）→ 排在 `but`（rank **25**，高频）前面 —— **低频优先，符合设计**；
+  * 「今日计划」为空：两词都无听写错误、未到复习期。说明词频**只重排候选池**，没有越界改变「计划构成」（计划仍仅由听写错误 / 到期驱动），三条硬边界守得住。
+* **结论**：P0 全链路闭环 —— 离线 asset 可加载、读取器真机生效、排序口径正确、边界未越界。**P0 装机验证通过。**
+
+---
+
+## 二十二、落地记录（2026-09-25 · P1：SRS 从 SM-2 升级为 FSRS）
+
+§20.4 的 P1。**替换完成，旧数据平滑迁移，lapse 语义重定义。**
+
+### 22.1 为什么上 FSRS
+
+SM-2（旧实现）只有 4 个参数（easeFactor / intervalDays / reps / lapses），间隔靠倍率硬推：`Again→1 天`、`Hard→1.5×`、`Good→2.5×`、`Easy→3×`。它的假设「同一张卡的相对难度永远不变」在实践中很快失真——同一词在不同句子里的记忆稳定性差异很大。FSRS 用 **21 个可优化参数** + 双变量状态（稳定性 stability / 难度 difficulty），显式建模「这次复习的间隔」与「回忆概率（desired retention）」的关系。
+
+本轮**不做参数拟合训练**（拟合需要大量复习日志），先接 FSRS 默认参数，等复习历史积累后再走 `fsrs optimize`。
+
+### 22.2 依赖与配置
+
+| 项 | 取值 |
+|:--|:--|
+| 依赖 | `fsrs: ^2.0.0`（`pubspec.yaml`，`flutter pub add fsrs` 解决到 2.0.1） |
+| 算法实现 | 移植自 `open-spaced-repetition/py-fsrs@6fd0857`（Dart 版） |
+| 参数集 | FSRS 默认 21 参数 |
+| `desiredRetention` | `0.9` |
+| `learningSteps` | `[10min]` |
+| `relearningSteps` | `[10min]` |
+| `enableFuzzing` | `false`（保证确定性，可测试、可复现；后续可开） |
+
+Learning / Relearning 步长设为 10 分钟，与旧 SM-2 的「Again = 10 分钟后重测」手感一致，用户迁移后无感知。
+
+### 22.3 状态字段与序列化
+
+`VocabularySrs` 新增 `Map<String, Object?>? fsrsState`，保存 FSRS `Card.toMap()` 的全部字段（`due` / `stability` / `difficulty` / `elapsedDays` / `scheduledDays` / `reps` / `lapses` / `state` / `lastReview`）。旧字段 `dueAt` / `intervalDays` **继续保留**，只用于 UI 展示与兼容读取——间隔数学完全交给 FSRS。
+
+```dart
+// VocabularySrs
+final Map<String, Object?>? fsrsState;   // FSRS 卡状态 JSON
+final int lapses;                         // 记忆丢失次数（语义已重定义，见 §22.5）
+final int drills;                         // 听写错误/原声回听次数
+DateTime? get dueAt;                      // 保留，兼容 UI 与旧存档
+double? get intervalDays;                 // 保留
+```
+
+### 22.4 `applyRating()` 现在做什么
+
+```
+applyRating(rating, now)
+  ├─ 1. 旧存档迁移：_migrateToFsrsCard(stamp)      // 仅首次调用时生效
+  ├─ 2. scheduler.reviewCard(card, rating, reviewTime=now)
+  ├─ 3. intervalDays = (next.due - next.lastReview).inDays
+  ├─ 4. lapse 判定：before.state == review && next.state == relearning → lapses + 1
+  ├─ 5. reviews + 1
+  └─ 6. fsrsState = next.toMap()；返回新的 VocabularySrs
+```
+
+`Rating` 四档一一映射：
+
+| 复习页 UI | `ReviewRating` | FSRS `Rating` |
+|:--|:--|:--|
+| 忘了（重测） | `again` | `Again` |
+| 有点难 | `hard` | `Hard` |
+| 记得（默认） | `good` | `Good` |
+| 太简单 | `easy` | `Easy` |
+
+### 22.5 lapse（记忆丢失）语义重定义 —— 关键差异
+
+* **FSRS 语义**：只有当卡从 `Review` 状态跌入 `Relearning` 才算一次 lapse。学习中（Learning）按 Again 只是延长学习步，**不**计 lapse。
+* 旧 SM-2 会把「新卡的 Again」也算一次 lapse（语义含糊），本轮**统一到 FSRS**：`lapses` 只在 Review→Relearning 时 +1。
+* `drills`（听写错误 / 原声回听）保持独立计数，不受影响。
+
+### 22.6 旧 SM-2 存档的平滑迁移
+
+`_migrateToFsrsCard(stamp)` 对**旧格式存档**（无 `fsrsState`）做一次性转换：
+
+| 旧存档条件 | 迁移目标 |
+|:--|:--|
+| 从未评过级（`reviews == 0`） | 全新卡：`state = New → Learning`，FSRS 走学习步 |
+| 已评过级 | `state = Review`、`stability ≈ intervalDays`、`difficulty = _mapEaseToDifficulty(easeFactor)`、`lastReview` 保留（FSRS 用真实 `elapsedDays`） |
+
+ease↔difficulty 反演映射（`ease ∈ [1.3, 3.0]` ↔ `difficulty ∈ [1, 10]`）：
+
+```dart
+// FSRS difficulty → SM-2 ease
+double _mapDifficultyToEase(double d) => 3.0 - (d - 1) / 9.0 * 1.7;
+// SM-2 ease → FSRS difficulty
+double _mapEaseToDifficulty(double ease) => 1 + (3.0 - ease) / 1.7 * 9.0;
+```
+
+即 difficulty=1（最易）↔ ease=3.0；difficulty=10（最难）↔ ease=1.3。已评过级的卡首评时 `elapsedDays` 按真实天数计算，不重置。
+
+> **实现注意（踩坑）**：早期版本用旧 `_srsFactor` / `_computeFactor` 从 SM-2 反算，迁移首评时 `elapsedDays=0` 会算出 NaN（`stability≈intervalDays` 后取 log 溢出）。已删除该逻辑，全部由 FSRS 内部 `_nextInterval` 计算。
+
+### 22.7 实测间隔节奏（`learningSteps=[10min]`, `relearningSteps=[10min]`, `enableFuzzing=false`）
+
+| 场景 | 结果 |
+|:--|:--|
+| 新卡 Again | 10 分钟后重测（学习步） |
+| 新卡 Good | **3 天** |
+| 新卡 Easy | **16 天** |
+| Good × 6 | 3 → 11 → 37 → 112 → 312 → 812 天 |
+| Easy × 6 | 16 → 164 → 1534 → 11509 → 36500（封顶） |
+| 同会话 Again 后 11 分钟点 Good | **约 24 小时**（不是 3 天） |
+
+**短时稳定度（short-term stability）**：当 `elapsedDays < 1`（同一会话内复习），FSRS 走 `_shortTermStability`，因此 Again 后 11 分钟 Good 只给 ~24h，不会直接跳到 3 天。这符合「同会话短重测」的真实记忆曲线。
+
+### 22.8 交付文件
+
+| 文件 | 变更 |
+|:--|:--|
+| `pubspec.yaml` | 新增 `fsrs: ^2.0.0` |
+| `lib/models/vocabulary_model.dart` | `VocabularySrs` 增 `fsrsState`；`applyRating()` 全量改写；新增 `_migrateToFsrsCard` / `_cardId` / `_mapDifficultyToEase` / `_mapEaseToDifficulty` / 静态 `_scheduler`；`ReviewRating.toFsrs` |
+| `lib/screens/vocabulary_review_screen.dart` | 无改动（UI 四档手感不变），`dueAt` / `intervalDays` 兼容读取 |
+| `test/training/vocabulary_srs_test.dart` | 全量改写为 FSRS 语义（25 项测试）：新卡 Again=10min、Good→3 天、Easy→16 天、Good 指数递进（`now` 推进到 `dueAt` 以规避短时稳定度）、lapse 仅 Review→Relearning、JSON 往返、两条旧 SM-2 迁移测试 |
+| `test/data/vocabulary_store_persistence_test.dart` | `intervalDays == 1` → `closeTo(3.0, 0.01)`（FSRS Good=3d） |
+| `test/screens/vocabulary_review_screen_test.dart` | 2 项更新：评级写进 SRS（`dueAt` 前移 + `fsrsState != null`，Again 后 11 分钟 Good ≈24h）；忘了 → 10 分钟（`lapses == 0`，新卡 Again 不计 lapse） |
+
+### 22.9 验证
+
+* `flutter analyze lib/ test/`：**0 issue**。
+* 全量 `flutter test`：**586 项通过**（P0 基线 577 + 新增 9，无回归）。
+
+### 22.10 后续（本轮不做）
+
+* **参数拟合**：等复习日志积累到一定量（FSRS 官方建议每张卡 ≥3 次复习、总样本数百条），用 `fsrs optimize` 重新拟合 21 参数，再考虑开 `enableFuzzing` 减少「记忆锚点」。
+* **复习页显示「回忆概率」**：FSRS 可算 `p_recall`，可作为 UI 提示（暂缓，避免界面噪音）。
+
+---
+
+## 二十三、落地记录（2026-09-25 · P2 已知词反哺 + P3 Anki 导出守卫）
+
+§20.4 的 P2 / P3。
+
+### 23.1 P2：非破坏式已知词反哺（严守 08「听优先」红线）
+
+**设计约束（红线）**：已知词只做**视觉弱化**，**绝不**减少输入——不隐藏、不重排、不删除、不降级可点性。字幕句子原文、词序、逐词可点交互全部保持不变。
+
+#### 23.1.1 渲染优先级（在 `SentenceDisplay` 内）
+
+```
+1. 已收藏（saved）  → 下划线（最高，不吞）
+2. 用户选中（selected） → 高亮底色
+3. 已知词（known） → 颜色弱化（textTertiary @ 0.75 alpha）
+```
+
+已知弱化是**最低优先级**，避免把「用户刚点的词」也一起弱化（那会造成交互反馈丢失）。
+
+#### 23.1.2 实现
+
+* `SentenceDisplay` 新增 `bool Function(String normalized)? isTokenKnown` 与 `Color? knownColor`。
+* `_TappableEnglish` / `_TappableWord` 透传 `known` / `knownColor`。
+* 已知判定走 `VocabularyStore.isKnownSurface(surface)`：
+  * **只**对 `VocabularyStatus.known` 返回 true；
+  * 与 `itemBySurface` 的查找顺序一致（先精确 surface，后 lemma 归并），保证「已掌握的」能被标出来。
+
+#### 23.1.3 开关（听写页）
+
+* `ListeningScreen` 新增 `bool _knownWordsHighlight = false`（默认关）。
+* 「更多」菜单新增 `known-words-toggle` `SwitchListTile`。
+* 开启时传入 `isTokenKnown: _vocabularyStore.isKnownSurface`，`knownColor: ll.textTertiary.withValues(alpha: 0.75)`。
+
+#### 23.1.4 边界
+
+* 学习中（Learning）的词**不弱化**，避免「还没学会就被标灰」。
+* 已收藏与已掌握重叠时，已收藏下划线优先（§23.1.1）。
+* 零内容丢失：测试断言已知词渲染后句子 token 数、词序、可点性均不变。
+
+### 23.2 P3：Anki 导出守卫 —— 候选池与已忽略不进 Anki
+
+§20.4 的 P3。**导出管线此前已可用**（生词本 export + `apkg_exporter`），本轮补上数据边界守卫，确保 `.apkg` 只包含「值得背」的词。
+
+#### 23.2.1 守卫函数
+
+```dart
+// lib/anki/apkg_exporter.dart
+bool isExportableVocabularyStatus(VocabularyStatus s) =>
+    s == VocabularyStatus.learning || s == VocabularyStatus.known;
+```
+
+导出范围（最终口径）：
+
+| `VocabularyStatus` | 是否导出 | 理由 |
+|:--|:--|:--|
+| `candidate`（候选池） | ❌ 不导出 | 只是「见过 / 可能不熟」，未定级，导出会造成 Anki 队列噪声 |
+| `learning` | ✅ 导出 | 有听写错误 / 已进入学习计划的词 |
+| `known` | ✅ 导出 | 已掌握的（用于复习巩固 / 迁移到桌面 Anki） |
+| `dismissed`（已忽略） | ❌ 不导出 | 用户明确排除 |
+
+#### 23.2.2 交付文件
+
+| 文件 | 变更 |
+|:--|:--|
+| `lib/anki/apkg_exporter.dart` | 新增 `isExportableVocabularyStatus()` 纯函数 |
+| `test/anki/apkg_exporter_test.dart` | 新增 P3 测试组：候选池/已忽略不导出、学习中/已掌握导出、媒体与 JSON 校验 |
+| `lib/screens/vocabulary_book_screen.dart` | 确认仍引用 `VocabularyStatus`（无多余 import） |
+
+### 23.3 P2 相关交付文件
+
+| 文件 | 变更 |
+|:--|:--|
+| `lib/widgets/sentence_display.dart` | 新增 `isTokenKnown` / `knownColor` / 已知弱化渲染 |
+| `lib/screens/listening_screen.dart` | 新增 `_knownWordsHighlight` 状态 + `known-words-toggle` 菜单项 |
+| `lib/data/vocabulary_store.dart` | 新增 `isKnownSurface()` |
+| `lib/l10n/ll_strings.dart` | 新增 `knownWordsHighlight` 文案 |
+| `test/widgets/sentence_display_test.dart` | P2 渲染测试：已知词弱化渲染、优先级、零内容丢失 |
+
+### 23.4 验证
+
+* `flutter analyze lib/ test/`：**0 issue**。
+* 全量 `flutter test`：**589 项通过**（P1 后 586 + 新增 3）。
+
+### 23.5 待办（下一轮）
+
+* **真机验证 P1/P2**：`flutter build apk --release` + `adb install -r`，确认复习页新卡 Good → 3 天、已知词开关生效。
+* **P3 真机导出**：生词本导出 `.apkg` → Anki 桌面端导入，确认候选池/已忽略不出现、学习中/已掌握按序导出。
+* **FSRS 参数拟合**（见 §22.10）。
