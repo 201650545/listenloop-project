@@ -37,14 +37,26 @@ docs/
 code/
 ├── lib/
 │   ├── screens/        # L1 课程库、L2 精听页、L3 设置页
-│   ├── widgets/        # ai_tutor_sheet.dart（AI 管家面板）、anki/（记忆卡复习）
+│   ├── widgets/        # ai_tutor_sheet.dart（AI 管家面板）、chinese_mind_map_view.dart（课文思维导图）、anki/（记忆卡复习）
 │   ├── player/         # video_playback_facade.dart（WebView 播放桥）+ 音频层
 │   ├── creation/       # 链接制课、本地文件制课、翻译服务
-│   ├── data/           # ai_governor_service.dart（大模型调用与回退链）
+│   ├── data/           # ai_governor_service.dart（大模型调用与回退链）、primary_chinese_curriculum.dart（1~9 年级统编版语文篇目真源）
 │   ├── models/         # sentence / lesson / anki_card 等数据契约
 │   └── preferences/    # app_preferences.dart（全部配置项与迁移逻辑）
 └── pubspec.yaml
 ```
+
+### 课文思维导图（2026-10-15 补入快照）
+
+| 文件 | 作用 |
+|---|---|
+| `code/lib/widgets/chinese_mind_map_view.dart` | 中文课程全景思维导图组件（无限画布平移缩放 / 搜索高亮聚焦 / 缩放锁定 / 收藏还原基准视图 / 课文点击直通精听） |
+| `code/lib/data/primary_chinese_curriculum.dart` | 1~9 年级上下册完整篇目数据（500+ 课，含语文园地子栏目），**已同步 2026 年秋季最新统编版教材** |
+| `code/lib/theme/listenloop_theme.dart` | 为兼容思维导图新增 `LLPalette.accent` 强调色字段（dark `#D4A574` / light `#8A5A2B`） |
+
+篇目数据口径：1~9 年级全部覆盖；已按 2026 年秋季统编版教材校准（小学三~六年级与初中九年级为该年替换批次）。核对流程与铁律见技能库 `统编版语文教材篇目核对与同步`。
+
+> ⚠️ 新增课文目前**只有标题**，句子切分与原声音频尚未入库。
 
 **给外部读者的建议阅读顺序**
 
@@ -88,6 +100,7 @@ code/
 ## 四、本仓库的边界（请读者注意）
 
 - `code/` 是**快照**，不是可构建的完整工程：不含 `android/` 宿主工程、不含 `test/`、不保证与 docs 描述逐行同步。
+- `code/lib/theme/listenloop_theme.dart` 为**兼容版**：本快照的调色板比活仓（`D:\listenloop`）旧一代，仅补了思维导图必需的 `accent` 字段；活仓另有 `ll_style.dart` 等新增文件未同步进来。改动真源永远是 `D:\listenloop`。
 - 已排除**本地 ASR 模型**（`sherpa-onnx-whisper-tiny.en`，358MB）与历史备份包（19MB tar）。
 - 所有 API Key 已替换为占位符（`YOUR_MIMO_API_KEY` / `YOUR_GATEWAY_KEY`）。仓库公开。
 - 文档中存在 2 处历史断链（`02_页面层级与路线契约.md`、`device_test_success.png`），这两个文件已不在库内，属既有情况，非本次同步产生。

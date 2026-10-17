@@ -35,6 +35,7 @@ class LLPalette extends ThemeExtension<LLPalette> {
     required this.divider,
     required this.disabled,
     required this.onPrimary,
+    required this.accent,
   });
 
   final Brightness brightness;
@@ -48,6 +49,9 @@ class LLPalette extends ThemeExtension<LLPalette> {
   final Color disabled;
   final Color onPrimary;
 
+  /// 主题强调色：用于锁定状态、高亮标记等需要跳出灰阶的强调位。
+  final Color accent;
+
   /// §九: the established ListenLoop identity.
   static const LLPalette dark = LLPalette(
     brightness: Brightness.dark,
@@ -60,6 +64,7 @@ class LLPalette extends ThemeExtension<LLPalette> {
     divider: Color(0xFF242424),
     disabled: Color(0xFF4A4A4A),
     onPrimary: Color(0xFF0A0A0A),
+    accent: Color(0xFFD4A574),
   );
 
   /// §十: warm-white paper, near-black ink — still black/white minimal.
@@ -74,6 +79,7 @@ class LLPalette extends ThemeExtension<LLPalette> {
     divider: Color(0xFFE5E5E2),
     disabled: Color(0xFFB8B8B8),
     onPrimary: Color(0xFFF7F7F5),
+    accent: Color(0xFF8A5A2B),
   );
 
   @override
@@ -88,6 +94,7 @@ class LLPalette extends ThemeExtension<LLPalette> {
     Color? divider,
     Color? disabled,
     Color? onPrimary,
+    Color? accent,
   }) => LLPalette(
     brightness: brightness ?? this.brightness,
     bg: bg ?? this.bg,
@@ -99,6 +106,7 @@ class LLPalette extends ThemeExtension<LLPalette> {
     divider: divider ?? this.divider,
     disabled: disabled ?? this.disabled,
     onPrimary: onPrimary ?? this.onPrimary,
+    accent: accent ?? this.accent,
   );
 
   @override
@@ -115,6 +123,7 @@ class LLPalette extends ThemeExtension<LLPalette> {
       divider: Color.lerp(divider, other.divider, t)!,
       disabled: Color.lerp(disabled, other.disabled, t)!,
       onPrimary: Color.lerp(onPrimary, other.onPrimary, t)!,
+      accent: Color.lerp(accent, other.accent, t)!,
     );
   }
 }

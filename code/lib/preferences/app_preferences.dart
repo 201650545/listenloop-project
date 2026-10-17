@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../theme/ll_style.dart';
+
 /// Personal reading preferences (spec V2 §六–§二十六 + follow-up):
 ///
 /// * `themeMode` — whole-app brightness (system/light/dark, default dark).
@@ -39,6 +41,25 @@ enum LearningFont {
     LearningFont.sans => 'Sans',
     LearningFont.serif => 'Serif',
     LearningFont.system => 'System',
+  };
+}
+
+/// Font family applied to CHINESE learning text and Pinyin annotations.
+enum LearningChineseFont {
+  song,
+  fangsong,
+  system;
+
+  String? get family => switch (this) {
+    LearningChineseFont.song => 'SongTi',
+    LearningChineseFont.fangsong => 'FangSong',
+    LearningChineseFont.system => null,
+  };
+
+  String get label => switch (this) {
+    LearningChineseFont.song => '宋体',
+    LearningChineseFont.fangsong => '仿宋',
+    LearningChineseFont.system => '系统',
   };
 }
 
@@ -92,7 +113,7 @@ const double kMaxTextScale = 1.50;
 const String kDefaultMimoBaseUrl = 'https://api.xiaomimimo.com/v1';
 
 /// MiMo 的 Bearer key，随 App 预填（本仓库无远端，不外泄）。
-const String kDefaultMimoApiKey = 'YOUR_MIMO_API_KEY';
+const String kDefaultMimoApiKey = 'sk-cn01v7bguiv9t5eydg1qm11pd4y76jeczxq61n0lrf9dnq7s';
 
 /// 统一模型 `mimo-v2.6-flash`。手机侧直连实测：
 /// * 字幕翻译 6.9s，严格返回 `{"translations": [...]}` 且条数与输入一致；
@@ -141,36 +162,112 @@ const String kDefaultYoutubeRelayBaseUrl = 'http://127.0.0.1:8793';
 const int kMinAsrThreads = 1;
 const int kMaxAsrThreads = 8;
 
-/// ASR quality tier (2026-09-18 用户拍板: Whisper 双档, 多语言模型).
-/// Both tiers are self-exported whisper ONNX with cross-attention outputs —
-/// the only form that yields word-level timestamps (M1 blocker).
+/// ASR quality tier.
+/// 2026-10-01 端侧瘦身升级（全面切换轻量端侧手机模型）：
+/// - fast: 英文·手机主力（NeMo Parakeet 110M CTC，~131.6 MB）
+/// - zhSmall: 中文·手机主力（Zipformer CTC small zh，~60 MB，31/31 字级时间戳完整）
+/// - precise: 精确档（保留 whisper/大模型扩展位）
 enum AsrTier {
-  /// whisper base — 快速档 (~160 MB int8, RTF≈0.13 on desktop).
+  /// 英文·手机（主力）— sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8 (~131.6 MB int8)。
   fast,
 
-  /// whisper small — 精确档 (~374 MB int8, RTF≈0.35 on desktop).
-  precise;
+  /// 精确档（备用/扩展）。
+  precise,
 
-  /// Model directory name under `models/asr/` holding the tier's
-  /// encoder/decoder/tokens files.
+  /// 中文·手机（主力）— sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16（~60 MB）。
+  /// 2026-10-07 按 10-05 八槽位定案替换原 paraformer-zh-small（无字级时间戳，已降为备选）。
+  zhSmall,
+
+  /// 历史中文大模型档名保留（兼容持久化存档或历史代码引用）。
+  @Deprecated('Use zhSmall instead')
+  zhFireRedCtc;
+
+  /// Model directory name under `models/asr/` holding the tier's files.
   String get modelDirName => switch (this) {
-    AsrTier.fast => 'whisper-base',
+    AsrTier.fast => 'sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8',
     AsrTier.precise => 'whisper-small',
+    AsrTier.zhSmall =>
+      'sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16',
+    AsrTier.zhFireRedCtc =>
+      'sherpa-onnx-paraformer-zh-small-2024-03-09',
   };
 
-  /// File names inside [modelDirName], as produced by
-  /// `export-onnx-with-attention.py` (torch ≤2.8, see SherpaOnnxAsrEngine).
+  /// Candidate directory names under `models/asr/` to probe in order.
+  List<String> get dirCandidates => switch (this) {
+    AsrTier.fast => const [
+      'sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8',
+      'nemo-parakeet-ctc-110m',
+      'whisper-base',
+    ],
+    AsrTier.precise => const [
+      'whisper-small',
+    ],
+    AsrTier.zhSmall => const [
+      'sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16',
+      'sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03',
+      'paraformer-zh-small',
+      'sherpa-onnx-paraformer-zh-2023-09-14',
+    ],
+    AsrTier.zhFireRedCtc => const [
+      'sherpa-onnx-paraformer-zh-small-2024-03-09',
+      'firered2-ctc-zh',
+      'sherpa-onnx-paraformer-zh-2023-09-14',
+    ],
+  };
+
+  /// File names inside [modelDirName].
   String get modelPrefix => switch (this) {
-    AsrTier.fast => 'base',
+    AsrTier.fast => 'model',
     AsrTier.precise => 'small',
+    AsrTier.zhSmall || AsrTier.zhFireRedCtc => 'model',
   };
   String get encoderFile => '$modelPrefix-encoder.int8.onnx';
   String get decoderFile => '$modelPrefix-decoder.int8.onnx';
-  String get tokensFile => '$modelPrefix-tokens.txt';
+
+  /// 词表文件：单文件档（NeMo CTC / Paraformer）词表为 `tokens.txt`；
+  /// whisper 双档带前缀。
+  String get tokensFile => switch (this) {
+    AsrTier.fast || AsrTier.zhSmall || AsrTier.zhFireRedCtc => 'tokens.txt',
+    _ => '$modelPrefix-tokens.txt',
+  };
+
+  /// 单文件模型文件名。
+  String get singleModelFile => '$modelPrefix.int8.onnx';
+
+  /// 引擎解码器类型。
+  String get sherpaModelKind => switch (this) {
+    AsrTier.fast => 'nemo_ctc',
+    AsrTier.zhSmall => 'zipformer_ctc',
+    AsrTier.zhFireRedCtc => 'paraformer',
+    AsrTier.precise => 'whisper',
+  };
+
+  /// 该档的 `result.tokens` 是否为 BBPE 字节片——不能直接拼成文本。
+  ///
+  /// 2026-10-15 PC 端实测（sherpa-onnx 1.13.8 + 本档自带 `test_wavs/0.wav`）：
+  /// `result.text` 恒为正确中文（`对我做了介绍那么我想说的是呢…`），而
+  /// `result.tokens` 恒为 `tokens.txt` 里的 BBPE 原始片（`▁ƌŕş` 之类），
+  /// 且 modeling_unit / bpe_vocab 四种组合（`''`、`cjkchar`、`bpe`、
+  /// `bpe+bbpe.model`）**结果完全一致**。即 BBPE 合并只在 sherpa-onnx
+  /// 内部产出 `text` 那一步发生，`tokens` 数组不会回写解码结果。
+  ///
+  /// 所以本档必须改用 `result.text` 取文本：拼 `tokens` 只会拿到乱码，
+  /// 这正是跟读验收一直识别不出的根因。
+  bool get tokensAreByteLevelBpe => switch (this) {
+    AsrTier.zhSmall => true,
+    _ => false,
+  };
+
+  /// 该档是否需要 encoder/decoder 双文件结构。
+  bool get needsEncoderDecoder => switch (this) {
+    AsrTier.fast || AsrTier.zhSmall || AsrTier.zhFireRedCtc => false,
+    AsrTier.precise => true,
+  };
 
   String get label => switch (this) {
-    AsrTier.fast => '快速档',
+    AsrTier.fast => '英文手机主力档',
     AsrTier.precise => '精确档',
+    AsrTier.zhSmall || AsrTier.zhFireRedCtc => '中文手机主力档',
   };
 }
 
@@ -178,7 +275,9 @@ enum AsrTier {
 class AppPreferences {
   const AppPreferences({
     this.themeMode = ThemeMode.dark,
+    this.style = LLStyle.base,
     this.learningFont = LearningFont.sans,
+    this.learningChineseFont = LearningChineseFont.song,
     this.textScale = 0.75,
     this.uiLanguage = AppLanguage.english,
     this.translationBaseUrl = kDefaultTranslationBaseUrl,
@@ -192,12 +291,18 @@ class AppPreferences {
     this.tutorModel = kDefaultTutorModel,
     this.libraryGridView = true,
     this.scrubberHaptics = true,
+    this.lessonLoop = true,
     this.configVersion = kCurrentConfigVersion,
   });
 
   /// §八: Dark is the default and stays ListenLoop's visual identity.
   final ThemeMode themeMode;
+
+  /// doc 21 §一: which of the four visual styles is active. Orthogonal to
+  /// [themeMode] — the style owns ink/material/shape, brightness picks its side.
+  final LLStyle style;
   final LearningFont learningFont;
+  final LearningChineseFont learningChineseFont;
   final double textScale;
   final AppLanguage uiLanguage;
 
@@ -242,6 +347,11 @@ class AppPreferences {
   /// while dragging (2026-09-22 user request; toggle lives in Settings).
   final bool scrubberHaptics;
 
+  /// Whether a lesson wraps back to its first sentence after the last one
+  /// finishes, instead of auto-advancing to the next lesson (2026-10-17
+  /// 郭老师 request: 课文播完不要自动切到下一课).
+  final bool lessonLoop;
+
   /// Schema version of the persisted configuration — see [kCurrentConfigVersion].
   final int configVersion;
 
@@ -259,7 +369,9 @@ class AppPreferences {
 
   AppPreferences copyWith({
     ThemeMode? themeMode,
+    LLStyle? style,
     LearningFont? learningFont,
+    LearningChineseFont? learningChineseFont,
     double? textScale,
     AppLanguage? uiLanguage,
     String? translationBaseUrl,
@@ -273,10 +385,13 @@ class AppPreferences {
     String? tutorModel,
     bool? libraryGridView,
     bool? scrubberHaptics,
+    bool? lessonLoop,
     int? configVersion,
   }) => AppPreferences(
     themeMode: themeMode ?? this.themeMode,
+    style: style ?? this.style,
     learningFont: learningFont ?? this.learningFont,
+    learningChineseFont: learningChineseFont ?? this.learningChineseFont,
     textScale: textScale ?? this.textScale,
     uiLanguage: uiLanguage ?? this.uiLanguage,
     translationBaseUrl: translationBaseUrl ?? this.translationBaseUrl,
@@ -290,6 +405,7 @@ class AppPreferences {
     tutorModel: tutorModel ?? this.tutorModel,
     libraryGridView: libraryGridView ?? this.libraryGridView,
     scrubberHaptics: scrubberHaptics ?? this.scrubberHaptics,
+    lessonLoop: lessonLoop ?? this.lessonLoop,
     configVersion: configVersion ?? this.configVersion,
   );
 }
@@ -316,7 +432,9 @@ class InMemoryAppPreferencesStore implements AppPreferencesStore {
 
 class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
   static const _keyThemeMode = 'listenloop:pref.themeMode';
+  static const _keyStyle = 'listenloop:pref.style';
   static const _keyFont = 'listenloop:pref.learningFont';
+  static const _keyChineseFont = 'listenloop:pref.learningChineseFont';
   static const _keyTextScale = 'listenloop:pref.textScale';
   static const _keyLanguage = 'listenloop:pref.uiLanguage';
   static const _keyTranslationBaseUrl = 'listenloop:pref.translationBaseUrl';
@@ -330,6 +448,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
   static const _keyTutorModel = 'listenloop:pref.tutorModel';
   static const _keyLibraryGridView = 'listenloop:pref.libraryGridView';
   static const _keyScrubberHaptics = 'listenloop:pref.scrubberHaptics';
+  static const _keyLessonLoop = 'listenloop:pref.lessonLoop';
   static const _keyConfigVersion = 'listenloop:pref.configVersion';
 
   /// Pre-follow-up builds stored the size as a preset name; honour it once.
@@ -376,9 +495,17 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
         (m) => m.name == sp.getString(_keyThemeMode),
         orElse: () => AppPreferences.defaults.themeMode,
       ),
+      style: LLStyle.values.firstWhere(
+        (s) => s.name == sp.getString(_keyStyle),
+        orElse: () => AppPreferences.defaults.style,
+      ),
       learningFont: LearningFont.values.firstWhere(
         (f) => f.name == sp.getString(_keyFont),
         orElse: () => AppPreferences.defaults.learningFont,
+      ),
+      learningChineseFont: LearningChineseFont.values.firstWhere(
+        (f) => f.name == sp.getString(_keyChineseFont),
+        orElse: () => AppPreferences.defaults.learningChineseFont,
       ),
       textScale:
           scale?.clamp(kMinTextScale, kMaxTextScale) ??
@@ -433,6 +560,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
                 AppPreferences.defaults.tutorModel),
       libraryGridView: sp.getBool(_keyLibraryGridView) ?? true,
       scrubberHaptics: sp.getBool(_keyScrubberHaptics) ?? true,
+      lessonLoop: sp.getBool(_keyLessonLoop) ?? true,
       configVersion: kCurrentConfigVersion,
     );
   }
@@ -441,7 +569,9 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
   Future<void> save(AppPreferences prefs) async {
     final sp = await SharedPreferences.getInstance();
     await sp.setString(_keyThemeMode, prefs.themeMode.name);
+    await sp.setString(_keyStyle, prefs.style.name);
     await sp.setString(_keyFont, prefs.learningFont.name);
+    await sp.setString(_keyChineseFont, prefs.learningChineseFont.name);
     await sp.setDouble(_keyTextScale, prefs.textScale);
     await sp.setString(_keyLanguage, prefs.uiLanguage.name);
     await sp.setString(_keyTranslationBaseUrl, prefs.translationBaseUrl);
@@ -455,6 +585,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
     await sp.setString(_keyTutorModel, prefs.tutorModel);
     await sp.setBool(_keyLibraryGridView, prefs.libraryGridView);
     await sp.setBool(_keyScrubberHaptics, prefs.scrubberHaptics);
+    await sp.setBool(_keyLessonLoop, prefs.lessonLoop);
     await sp.setInt(_keyConfigVersion, prefs.configVersion);
   }
 }
@@ -479,7 +610,9 @@ class PreferencesController extends ChangeNotifier {
 
   Future<void> update({
     ThemeMode? themeMode,
+    LLStyle? style,
     LearningFont? learningFont,
+    LearningChineseFont? learningChineseFont,
     double? textScale,
     AppLanguage? uiLanguage,
     String? translationBaseUrl,
@@ -493,10 +626,13 @@ class PreferencesController extends ChangeNotifier {
     String? tutorModel,
     bool? libraryGridView,
     bool? scrubberHaptics,
+    bool? lessonLoop,
   }) async {
     _prefs = _prefs.copyWith(
       themeMode: themeMode,
+      style: style,
       learningFont: learningFont,
+      learningChineseFont: learningChineseFont,
       textScale: textScale,
       uiLanguage: uiLanguage,
       translationBaseUrl: translationBaseUrl,
@@ -510,6 +646,7 @@ class PreferencesController extends ChangeNotifier {
       tutorModel: tutorModel,
       libraryGridView: libraryGridView,
       scrubberHaptics: scrubberHaptics,
+      lessonLoop: lessonLoop,
     );
     notifyListeners();
     try {
