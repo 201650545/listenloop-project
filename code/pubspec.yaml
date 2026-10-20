@@ -1,5 +1,5 @@
-﻿name: listenloop
-description: "ListenLoop - English intensive listening, sentence by sentence (Milestone 1)."
+﻿name: phrasing
+description: "句读 (Phrasing) - 小学语文/英语精听跟读，句级听读闭环。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 0.9.2+4029
 
 environment:
   sdk: ^3.13.3
@@ -50,6 +50,10 @@ dependencies:
   # M3 从链接创建: bilibili view/playurl APIs and DASH media download.
   http: ^1.2.2
   crypto: ^3.0.3
+  fsrs: ^2.0.1
+  share_plus: ^12.0.2
+  record: ^7.1.2
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:
@@ -61,6 +65,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  sqflite_common_ffi: ^2.4.3
 # objective_c 9.6.x uses Architecture.arm64e (native assets API) which is not
 # available in the bundled code_assets of Dart 3.13.3 — its hook fails to
 # compile during Android builds. It is pulled in transitively by
@@ -92,12 +97,20 @@ flutter:
           weight: 600
         - asset: assets/fonts/Roboto-Bold.ttf
           weight: 700
+    - family: SongTi
+      fonts:
+        - asset: assets/fonts/SongTi.ttf
+    - family: FangSong
+      fonts:
+        - asset: assets/fonts/FangSong.ttf
 
 
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/audio/sample.mp3
     - assets/audio/gettysburg.mp3
+    - assets/data/ngsl3000.tsv
+    - assets/data/textbook_grade2_term1.json
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

@@ -10,7 +10,8 @@ enum SubtitleMode { hidden, english, chinese, bilingual }
 
 extension SubtitleModeX on SubtitleMode {
   /// Whether the original transcript (English, Japanese, etc.) should be shown.
-  bool get showsOriginal => this != SubtitleMode.hidden;
+  bool get showsOriginal =>
+      this == SubtitleMode.english || this == SubtitleMode.bilingual;
 
   /// Compatibility alias for [showsOriginal].
   bool get showsEnglish => showsOriginal;
@@ -45,8 +46,8 @@ extension SubtitleModeX on SubtitleMode {
     return switch (this) {
       SubtitleMode.hidden => 'HIDE',
       SubtitleMode.english => code,
-      SubtitleMode.chinese => 'ZH',
-      SubtitleMode.bilingual => '$code/ZH',
+      SubtitleMode.chinese => 'CN',
+      SubtitleMode.bilingual => '$code/CN',
     };
   }
 

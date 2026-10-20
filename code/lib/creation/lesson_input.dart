@@ -10,12 +10,14 @@ class LessonInput {
     required this.path,
     this.titleHint,
     this.language,
+    this.readingMode = false,
   }) : source = null;
 
   const LessonInput.link({
     required this.source,
     this.titleHint,
     this.language,
+    this.readingMode = false,
   }) : path = null;
 
   /// Absolute path for [LessonInputKind.localFile].
@@ -29,6 +31,11 @@ class LessonInput {
 
   /// Optional language hint (e.g. 'en', 'ja', 'zh'). Null = auto-detect.
   final String? language;
+
+  /// 课文朗读模式（2026-09-29 用户需求）：中文按「逗号/句号」的朗读
+  /// 单元切句，每个短句都可单独循环——早读带读用。对已导入课程无影响
+  /// （切句发生在导入时）。仅中文链路生效。
+  final bool readingMode;
 
   /// `audio` or `video` — drives whether audio extraction is needed (M2).
   LessonInputMediaType get mediaType {

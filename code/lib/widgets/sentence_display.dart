@@ -4,6 +4,7 @@ import '../models/sentence.dart';
 import '../models/subtitle_token.dart';
 import '../theme/listenloop_theme.dart';
 import '../utils/time_format.dart';
+import 'chinese_textbook_ruby_layout.dart';
 
 /// The visual centre of the listening screen: the current English sentence
 /// (first focus), the Chinese translation (second layer) and the sentence's
@@ -19,17 +20,23 @@ class SentenceDisplay extends StatelessWidget {
     required this.currentPosition,
     this.showEnglish = true,
     this.showChinese = true,
+    this.isChineseMode = false,
     this.styles,
     this.accumulationMode = false,
     this.onTokenTap,
     this.onPhraseSelected,
     this.isTokenSaved,
+    this.isTokenKnown,
+    this.knownColor,
   });
 
   final Sentence sentence;
   final Duration currentPosition;
   final bool showEnglish;
   final bool showChinese;
+
+  /// 是否为中文课文模式：开启后汉字上方精准对齐带声调拼音，且不展示第二行翻译
+  final bool isChineseMode;
 
   /// Learning typography resolved by the caller from the user preferences.
   final LLReadLearningStyles? styles;
@@ -53,6 +60,29 @@ class SentenceDisplay extends StatelessWidget {
   /// 该字符区间是否已保存 —— 决定是否给出「已存」轻标记。
   final bool Function(int charStart, int charEnd)? isTokenSaved;
 
+  /// **P2 非破坏式已知词反哺**：该词（归一化形式）是否已被用户标记为
+  /// 「已掌握」。
+  ///
+  /// 只影响**视觉**（颜色），**绝不影响**：
+  ///   * 内容 —— 已知词照样完整显示，不隐藏、不替换、不折叠；
+  ///   * 顺序 —— 不重排，句子原样呈现；
+  ///   * 可点性 —— 仍可点击、仍可存入/取消候选。
+  ///
+  /// 08 号红线（「听优先」）：反哺内容 = 帮用户把注意力引向生词，
+  /// 而不是把已知词从输入里删掉。**减少输入 = 破坏精听训练**。
+  /// 所以默认关（null），只在用户主动开启后生效。
+  ///
+  /// 入参用 [SubtitleToken.normalized]，与 [VocabularyItem.itemKey] 判重口径一致
+  /// （`take off` 这类短语在 accumulation mode 里按 token 单次呈现，命中
+  /// 已掌握短语时也会淡出）。
+  final bool Function(String normalized)? isTokenKnown;
+
+  /// 已知词的视觉颜色。null = 使用 [styles.english] 默认色（不变）。
+  ///
+  /// 由调用方从主题里挑，语义是「弱化但可读」，不能低到看不见
+  /// （那等于隐藏内容，同样违反 08）。
+  final Color? knownColor;
+
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
@@ -63,7 +93,22 @@ class SentenceDisplay extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (showEnglish)
+        if (isChineseMode)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ChineseTextbookRubyLayout(
+              text: sentence.originalText,
+              charSize: styles?.chineseMain?.fontSize ?? 28.0,
+              charStyle: styles?.chineseMain ??
+                  styles?.english.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+              chineseFontFamily: styles?.chineseMain?.fontFamily,
+              textAlign: TextAlign.center,
+              activeCharIndex: sentence.activeCharIndexAt(currentPosition.inMilliseconds),
+            ),
+          )
+        else if (showEnglish)
           accumulationMode
               ? _TappableEnglish(
                   text: sentence.originalText,
@@ -77,9 +122,11 @@ class SentenceDisplay extends StatelessWidget {
                       ),
                   savedColor: ll.textTertiary,
                   highlightColor: ll.surfaceHigh,
+                  knownColor: knownColor,
                   onTokenTap: onTokenTap,
                   onPhraseSelected: onPhraseSelected,
                   isTokenSaved: isTokenSaved,
+                  isTokenKnown: isTokenKnown,
                 )
               : Text(
                   sentence.originalText,
@@ -93,7 +140,7 @@ class SentenceDisplay extends StatelessWidget {
                         color: ll.textPrimary,
                       ),
                 ),
-        if (showChinese)
+        if (showChinese && !isChineseMode)
           Padding(
             padding: const EdgeInsets.only(top: 16),
             child: Text(
@@ -124,10 +171,15 @@ class SentenceDisplay extends StatelessWidget {
 
 /// Resolved learning styles handed to the sentence views.
 class LLReadLearningStyles {
-  const LLReadLearningStyles({required this.english, required this.chinese});
+  const LLReadLearningStyles({
+    required this.english,
+    required this.chinese,
+    this.chineseMain,
+  });
 
   final TextStyle english;
   final TextStyle chinese;
+  final TextStyle? chineseMain;
 }
 
 /// 把整句英文切成可点击的词，**保留原句的空格与标点**。
@@ -151,18 +203,26 @@ class _TappableEnglish extends StatefulWidget {
     required this.style,
     required this.savedColor,
     required this.highlightColor,
+    this.knownColor,
     this.onTokenTap,
     this.onPhraseSelected,
     this.isTokenSaved,
+    this.isTokenKnown,
   });
 
   final String text;
   final TextStyle style;
   final Color savedColor;
   final Color highlightColor;
+
+  /// 已知词弱化色（P2）。null = 不启用反哺。
+  final Color? knownColor;
   final void Function(SubtitleToken token)? onTokenTap;
   final void Function(SubtitleSelection selection)? onPhraseSelected;
   final bool Function(int charStart, int charEnd)? isTokenSaved;
+
+  /// 已知词判定（P2）：按归一化词形查询，null = 关闭。
+  final bool Function(String normalized)? isTokenKnown;
 
   @override
   State<_TappableEnglish> createState() => _TappableEnglishState();
@@ -295,9 +355,13 @@ class _TappableEnglishState extends State<_TappableEnglish> {
                 widget.isTokenSaved?.call(token.charStart, token.charEnd) ??
                 false,
             selected: lo != null && hi != null && i >= lo && i <= hi,
+            known:
+                widget.isTokenKnown?.call(token.normalized) ??
+                false,
             style: widget.style,
             savedColor: widget.savedColor,
             highlightColor: widget.highlightColor,
+            knownColor: widget.knownColor,
             onTap: widget.onTokenTap,
           ),
         ),
@@ -335,20 +399,32 @@ class _TappableWord extends StatelessWidget {
     required this.style,
     required this.savedColor,
     required this.highlightColor,
+    this.known = false,
+    this.knownColor,
     this.onTap,
   });
 
   final SubtitleToken token;
   final bool saved;
   final bool selected;
+  final bool known;
   final TextStyle style;
   final Color savedColor;
   final Color highlightColor;
+
+  /// 已知词弱化色；null = 不启用 P2（保持原色）。
+  final Color? knownColor;
   final void Function(SubtitleToken token)? onTap;
 
   @override
   Widget build(BuildContext context) {
     var effective = style;
+    // 弱化（P2）优先级最低：saved（已存）与 selected（拖选）覆盖它。
+    // 这是有意的 —— 已存词的「已存」信号比「已知」更贴近当下动作，
+    // 不能让淡色把下划线吞掉。
+    if (known && knownColor != null) {
+      effective = effective.copyWith(color: knownColor);
+    }
     if (saved) {
       effective = effective.copyWith(
         color: savedColor,

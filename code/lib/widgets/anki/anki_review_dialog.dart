@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/ai_governor_service.dart';
 import '../../models/anki_card_model.dart';
+import '../../theme/listenloop_theme.dart';
 import '../ll_brand.dart';
 
 enum AnkiCardFaceMode {
@@ -30,14 +31,10 @@ class AnkiReviewDialog extends StatefulWidget {
     required AiGovernorService aiGovernorService,
     void Function(int startMs, int endMs)? onPlaySnippet,
   }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF141414) : const Color(0xFFF9F9F8);
-
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: bgColor,
+      backgroundColor: context.ll.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -132,12 +129,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final secondaryColor = isDark ? Colors.white70 : Colors.black87;
-    final tertiaryColor = isDark ? Colors.white38 : Colors.black45;
-    final dividerColor = isDark ? const Color(0xFF2E2E2E) : const Color(0xFFE5E5E5);
-
+    final ll = context.ll;
     final height = MediaQuery.of(context).size.height * 0.88;
 
     return SizedBox(
@@ -151,7 +143,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: tertiaryColor,
+                color: ll.textTertiary,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -164,16 +156,23 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               children: [
                 const LLMark(size: 16),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Anki · AI 记忆强化',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: ll.textPrimary,
+                  ),
                 ),
                 const Spacer(),
                 if (!_completed && _queue.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF282828) : const Color(0xFFEBEBEB),
+                      color: ll.emphasis,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -181,48 +180,47 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: secondaryColor,
+                        color: ll.textSecondary,
                       ),
                     ),
                   ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.close, size: 20),
+                  icon: Icon(Icons.close, size: 20, color: ll.textSecondary),
                   onPressed: () => Navigator.of(context).pop(),
                   tooltip: '关闭',
                 ),
               ],
             ),
           ),
-          Divider(height: 1, color: dividerColor),
+          Divider(height: 1, color: ll.divider),
 
           // Content
           Expanded(
-            child: _completed ? _buildCompletionView(context, isDark) : _buildReviewView(context, isDark),
+            child: _completed
+                ? _buildCompletionView(context)
+                : _buildReviewView(context),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildReviewView(BuildContext context, bool isDark) {
+  Widget _buildReviewView(BuildContext context) {
+    final ll = context.ll;
+
     if (_queue.isEmpty) {
       return Center(
         child: Text(
           '当前课程暂无待复习闪卡\n点击单句上的「🎴 闪卡」即可加入！',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 14,
-            height: 1.6,
-            color: isDark ? Colors.white54 : Colors.black54,
-          ),
+          style: TextStyle(fontSize: 14, height: 1.6, color: ll.textTertiary),
         ),
       );
     }
 
     final card = _queue[_currentIndex];
-    final surfaceColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF333333) : const Color(0xFFE0E0E0);
+    final surfaceColor = ll.surfaceHigh;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -234,11 +232,11 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildModeChip('🔤 填空', AnkiCardFaceMode.cloze, isDark),
+                _buildModeChip(context, '🔤 填空', AnkiCardFaceMode.cloze),
                 const SizedBox(width: 8),
-                _buildModeChip('🎧 盲听', AnkiCardFaceMode.blind, isDark),
+                _buildModeChip(context, '🎧 盲听', AnkiCardFaceMode.blind),
                 const SizedBox(width: 8),
-                _buildModeChip('📖 全显', AnkiCardFaceMode.full, isDark),
+                _buildModeChip(context, '📖 全显', AnkiCardFaceMode.full),
               ],
             ),
           ),
@@ -263,9 +261,13 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
                         ? Transform(
                             transform: Matrix4.identity()..rotateY(math.pi),
                             alignment: Alignment.center,
-                            child: _buildBackCard(card, surfaceColor, borderColor, isDark),
+                            child: _buildBackCard(
+                              context,
+                              card,
+                              surfaceColor,
+                            ),
                           )
-                        : _buildFrontCard(card, surfaceColor, borderColor, isDark),
+                        : _buildFrontCard(context, card, surfaceColor),
                   );
                 },
               ),
@@ -278,30 +280,38 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
             ElevatedButton.icon(
               onPressed: _flipCard,
               icon: const Icon(Icons.flip_to_back_rounded, size: 18),
-              label: const Text('翻转查看 AI 详解', style: TextStyle(fontWeight: FontWeight.w600)),
+              label: const Text(
+                '翻转查看 AI 详解',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
             )
           else
-            _buildRatingButtons(isDark),
+            _buildRatingButtons(context),
         ],
       ),
     );
   }
 
-  Widget _buildModeChip(String label, AnkiCardFaceMode mode, bool isDark) {
+  Widget _buildModeChip(
+    BuildContext context,
+    String label,
+    AnkiCardFaceMode mode,
+  ) {
+    final ll = context.ll;
     final isSelected = _mode == mode;
     return GestureDetector(
       onTap: () => setState(() => _mode = mode),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+        duration: LLMotion.normal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected
-              ? (isDark ? Colors.white : Colors.black)
-              : (isDark ? const Color(0xFF262626) : const Color(0xFFEEEEEE)),
+          color: isSelected ? ll.inverseSurface : ll.emphasis,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
@@ -309,9 +319,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
           style: TextStyle(
             fontSize: 12,
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-            color: isSelected
-                ? (isDark ? Colors.black : Colors.white)
-                : (isDark ? Colors.white70 : Colors.black87),
+            color: isSelected ? ll.onInverseSurface : ll.textSecondary,
           ),
         ),
       ),
@@ -319,11 +327,13 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
   }
 
   Widget _buildFrontCard(
+    BuildContext context,
     AnkiCard card,
     Color surfaceColor,
-    Color borderColor,
-    bool isDark,
   ) {
+    final ll = context.ll;
+    final shape = context.llShape;
+
     String displayText;
     switch (_mode) {
       case AnkiCardFaceMode.cloze:
@@ -343,13 +353,14 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
       decoration: BoxDecoration(
         color: surfaceColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: borderColor, width: 1.2),
+        border: Border.all(color: ll.divider, width: 1.2),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
+          if (shape.shadowOn)
+            BoxShadow(
+              color: ll.shadow.withValues(alpha: shape.shadowAlpha),
+              blurRadius: 14,
+              offset: const Offset(0, 4),
+            ),
         ],
       ),
       child: Column(
@@ -360,18 +371,26 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: Colors.blueAccent.withValues(alpha: 0.15),
+                  color: ll.info.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text(
+                child: Text(
                   '正面 · 听感记忆',
-                  style: TextStyle(fontSize: 11, color: Colors.blueAccent, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: ll.info,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               const Spacer(),
               IconButton(
                 onPressed: _playCurrentSnippet,
-                icon: const Icon(Icons.volume_up_rounded, color: Colors.blueAccent, size: 24),
+                icon: Icon(
+                  Icons.volume_up_rounded,
+                  color: ll.info,
+                  size: 24,
+                ),
                 tooltip: '重听原声片段',
               ),
             ],
@@ -386,7 +405,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               fontSize: _mode == AnkiCardFaceMode.blind ? 15 : 20,
               fontWeight: FontWeight.w600,
               height: 1.5,
-              color: isDark ? Colors.white : Colors.black,
+              color: ll.textPrimary,
             ),
           ),
           if (_mode == AnkiCardFaceMode.cloze && !_clozeRevealed) ...[
@@ -394,14 +413,17 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
             GestureDetector(
               onTap: () => setState(() => _clozeRevealed = true),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFECECEC),
+                  color: ll.emphasis,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Text(
+                child: Text(
                   '点击揭晓挖空词',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                  style: TextStyle(fontSize: 11, color: ll.textTertiary),
                 ),
               ),
             ),
@@ -413,13 +435,17 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF262626) : const Color(0xFFF2F2F2),
+              color: ll.emphasis,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.lightbulb_outline_rounded, size: 16, color: Colors.amber),
+                Icon(
+                  Icons.lightbulb_outline_rounded,
+                  size: 16,
+                  color: ll.warning,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -427,7 +453,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.4,
-                      color: isDark ? Colors.white70 : Colors.black87,
+                      color: ll.textSecondary,
                     ),
                   ),
                 ),
@@ -440,24 +466,27 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
   }
 
   Widget _buildBackCard(
+    BuildContext context,
     AnkiCard card,
     Color surfaceColor,
-    Color borderColor,
-    bool isDark,
   ) {
+    final ll = context.ll;
+    final shape = context.llShape;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: surfaceColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.green.withValues(alpha: 0.4), width: 1.4),
+        border: Border.all(color: ll.success.withValues(alpha: 0.4), width: 1.4),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
+          if (shape.shadowOn)
+            BoxShadow(
+              color: ll.shadow.withValues(alpha: shape.shadowAlpha * 1.2),
+              blurRadius: 14,
+              offset: const Offset(0, 4),
+            ),
         ],
       ),
       child: SingleChildScrollView(
@@ -467,20 +496,31 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.15),
+                    color: ll.success.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Text(
+                  child: Text(
                     '背面 · AI 深度复盘',
-                    style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: ll.success,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 const Spacer(),
                 IconButton(
                   onPressed: _playCurrentSnippet,
-                  icon: const Icon(Icons.volume_up_rounded, color: Colors.green, size: 24),
+                  icon: Icon(
+                    Icons.volume_up_rounded,
+                    color: ll.success,
+                    size: 24,
+                  ),
                   tooltip: '重听原声片段',
                 ),
               ],
@@ -493,7 +533,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
-                color: isDark ? Colors.white : Colors.black,
+                color: ll.textPrimary,
               ),
             ),
             const SizedBox(height: 6),
@@ -501,12 +541,12 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               card.chineseTranslation,
               style: TextStyle(
                 fontSize: 14,
-                color: isDark ? Colors.white60 : Colors.black54,
+                color: ll.textSecondary,
                 height: 1.4,
               ),
             ),
             const SizedBox(height: 16),
-            Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12),
+            Divider(height: 1, color: ll.divider),
             const SizedBox(height: 14),
 
             // AI In-Depth Explanation
@@ -515,7 +555,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               style: TextStyle(
                 fontSize: 13,
                 height: 1.6,
-                color: isDark ? Colors.white.withValues(alpha: 0.87) : Colors.black87,
+                color: ll.textPrimary,
               ),
             ),
           ],
@@ -524,21 +564,22 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
     );
   }
 
-  Widget _buildRatingButtons(bool isDark) {
+  Widget _buildRatingButtons(BuildContext context) {
+    final ll = context.ll;
     return Row(
       children: [
-        _buildRatingBtn(AnkiRating.again, Colors.redAccent, isDark),
+        _buildRatingBtn(AnkiRating.again, ll.danger),
         const SizedBox(width: 8),
-        _buildRatingBtn(AnkiRating.hard, Colors.orangeAccent, isDark),
+        _buildRatingBtn(AnkiRating.hard, ll.warning),
         const SizedBox(width: 8),
-        _buildRatingBtn(AnkiRating.good, Colors.green, isDark),
+        _buildRatingBtn(AnkiRating.good, ll.success),
         const SizedBox(width: 8),
-        _buildRatingBtn(AnkiRating.easy, Colors.blueAccent, isDark),
+        _buildRatingBtn(AnkiRating.easy, ll.info),
       ],
     );
   }
 
-  Widget _buildRatingBtn(AnkiRating rating, Color color, bool isDark) {
+  Widget _buildRatingBtn(AnkiRating rating, Color color) {
     return Expanded(
       child: InkWell(
         onTap: () => _rateCard(rating),
@@ -546,7 +587,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: isDark ? 0.16 : 0.1),
+            color: color.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: color.withValues(alpha: 0.4)),
           ),
@@ -576,7 +617,8 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
     );
   }
 
-  Widget _buildCompletionView(BuildContext context, bool isDark) {
+  Widget _buildCompletionView(BuildContext context) {
+    final ll = context.ll;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -588,14 +630,22 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               height: 72,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.green.withValues(alpha: 0.15),
+                color: ll.success.withValues(alpha: 0.15),
               ),
-              child: const Icon(Icons.check_circle_rounded, size: 44, color: Colors.green),
+              child: Icon(
+                Icons.check_circle_rounded,
+                size: 44,
+                color: ll.success,
+              ),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               '今日复习已完成！',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: ll.textPrimary,
+              ),
             ),
             const SizedBox(height: 10),
             Text(
@@ -604,7 +654,7 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               style: TextStyle(
                 fontSize: 14,
                 height: 1.5,
-                color: isDark ? Colors.white60 : Colors.black54,
+                color: ll.textSecondary,
               ),
             ),
             const SizedBox(height: 28),
@@ -612,7 +662,9 @@ class _AnkiReviewDialogState extends State<AnkiReviewDialog>
               onPressed: () => Navigator.of(context).pop(),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(160, 46),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
               child: const Text('好的，继续精听'),
             ),

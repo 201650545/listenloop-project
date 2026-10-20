@@ -9,6 +9,7 @@ import '../models/vocabulary_model.dart';
 import '../player/audio_player_facade.dart';
 import '../player/just_audio_facade.dart';
 import '../theme/listenloop_theme.dart';
+import '../widgets/ll_page.dart';
 import '../training/vocabulary_drill.dart';
 import '../training/vocabulary_plan.dart';
 import 'ai_quiz_launcher.dart';
@@ -174,40 +175,33 @@ class _VocabularyReviewScreenState extends State<VocabularyReviewScreen> {
     final ll = context.ll;
     final s = LLStrings.of(context);
 
-    return Scaffold(
-      backgroundColor: ll.bg,
-      appBar: AppBar(
-        backgroundColor: ll.bg,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: BackButton(color: ll.textPrimary),
-        titleSpacing: 0,
-        title: Text(
-          s.reviewTitle,
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: ll.textPrimary,
-          ),
+    return LLPage(
+      leading: BackButton(color: ll.textPrimary),
+      title: Text(
+        s.reviewTitle,
+        style: TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+          color: ll.textPrimary,
         ),
-        actions: [
-          if (!_finished && _queue.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Center(
-                child: Text(
-                  s.reviewProgress(_index + 1, _queue.length),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: ll.textTertiary,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
+      ),
+      actions: [
+        if (!_finished && _queue.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: Text(
+                s.reviewProgress(_index + 1, _queue.length),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: ll.textTertiary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ),
-        ],
-      ),
-      body: SafeArea(child: _buildBody(context, s, ll)),
+          ),
+      ],
+      body: _buildBody(context, s, ll)
     );
   }
 

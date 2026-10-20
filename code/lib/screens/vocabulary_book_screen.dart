@@ -1,21 +1,28 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../anki/apkg_exporter.dart';
+import '../anki/apkg_share.dart';
 import '../data/ai_governor_service.dart';
 import '../data/vocabulary_store.dart';
+import '../data/word_frequency_loader.dart';
 import '../player/audio_player_facade.dart';
 import '../l10n/ll_strings.dart';
 import '../models/vocabulary_model.dart';
+import '../models/sentence.dart';
+import '../preferences/app_preferences.dart';
+import '../sync/data_backup.dart';
+import '../sync/data_import.dart';
 import '../theme/listenloop_theme.dart';
 import '../training/vocabulary_drill.dart';
 import '../training/vocabulary_plan.dart';
+import '../widgets/ll_page.dart';
 import 'ai_quiz_launcher.dart';
 import 'vocabulary_drill_screen.dart';
 import 'vocabulary_review_screen.dart';
+import 'meaning_recall_screen.dart';
 
 /// 生词本 —— Library 的**二级页面**（附属层，见 08 定调与 10 号文档 §十二）。
 ///
@@ -64,6 +71,9 @@ class VocabularyBookScreen extends StatefulWidget {
   State<VocabularyBookScreen> createState() => _VocabularyBookScreenState();
 }
 
+/// 导入确认对话框的三种选择。
+enum _ImportChoice { cancel, merge, overwrite }
+
 class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
   /// null = 全部。
   VocabularyStatus? _filter;
@@ -75,141 +85,149 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
     final ll = context.ll;
     final s = LLStrings.of(context);
 
-    return Scaffold(
-      backgroundColor: ll.bg,
-      appBar: AppBar(
-        backgroundColor: ll.bg,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: BackButton(color: ll.textPrimary),
-        titleSpacing: 0,
-        title: Text(
-          s.vocabBook,
-          style: LLText.pageTitle.copyWith(color: ll.textPrimary, fontSize: 22),
-        ),
-        actions: [
-          IconButton(
-            key: const Key('vocab-export-apkg'),
-            tooltip: s.vocabExportApkg,
-            icon: Icon(Icons.ios_share, size: 19, color: ll.textSecondary),
-            onPressed: _exportApkg,
-          ),
-        ],
+    return LLPage(
+      leading: BackButton(color: ll.textPrimary),
+      title: Text(
+        s.vocabBook,
+        style: LLText.pageTitle.copyWith(color: ll.textPrimary, fontSize: 22),
       ),
+      actions: [
+        IconButton(
+          key: const Key('vocab-export-apkg'),
+          tooltip: s.vocabExportApkg,
+          icon: Icon(Icons.ios_share, size: 19, color: ll.textSecondary),
+          onPressed: _exportApkg,
+        ),
+        IconButton(
+          key: const Key('vocab-export-backup'),
+          tooltip: s.dataBackupTooltip,
+          icon: Icon(Icons.save_alt, size: 19, color: ll.textSecondary),
+          onPressed: _exportBackup,
+        ),
+        IconButton(
+          key: const Key('vocab-import-backup'),
+          tooltip: s.dataImportTooltip,
+          icon: Icon(Icons.settings_backup_restore,
+              size: 19, color: ll.textSecondary),
+          onPressed: _importBackup,
+        ),
+      ],
       body: ListenableBuilder(
-        listenable: widget.store,
-        builder: (context, _) {
-          final items = widget.store.items;
-          final plan = _planner.build(items);
+      listenable: widget.store,
+      builder: (context, _) {
+        final items = widget.store.items;
+        final plan = _planner.build(items,
+            frequency: WordFrequencyHolder.current);
 
-          if (items.isEmpty) {
-            return _EmptyVocabulary(palette: ll, text: s.vocabEmpty);
-          }
+        if (items.isEmpty) {
+          return _EmptyVocabulary(palette: ll, text: s.vocabEmpty);
+        }
 
-          final visible = widget.store.byStatus(_filter);
+        final visible = widget.store.byStatus(_filter);
 
-          return CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: _SummaryHeader(
-                  palette: ll,
-                  summary: s.vocabSummary(
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: _SummaryHeader(
+                palette: ll,
+                summary: s.vocabSummary(
+                  widget.store.candidateCount,
+                  widget.store.learningCount,
+                  widget.store.knownCount,
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: _ReviewEntry(
+                palette: ll,
+                dueCount: _dueCount,
+                onTap: _startReview,
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: _PlanSection(
+                palette: ll,
+                entries: plan,
+                emptyText: s.vocabTodayPlanEmpty,
+                onStartDrill: _startDrill,
+                onStartReview: (entry) =>
+                    _startReview(onlyItemId: entry.item.id),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: _FilterBar(
+                palette: ll,
+                selected: _filter,
+                labels: <VocabularyStatus?, (String, int)>{
+                  null: (s.vocabAll, items.length),
+                  VocabularyStatus.candidate: (
+                    s.vocabStatusLabel('candidate'),
                     widget.store.candidateCount,
+                  ),
+                  VocabularyStatus.learning: (
+                    s.vocabStatusLabel('learning'),
                     widget.store.learningCount,
+                  ),
+                  VocabularyStatus.known: (
+                    s.vocabStatusLabel('known'),
                     widget.store.knownCount,
                   ),
-                ),
+                },
+                onSelect: (value) => setState(() => _filter = value),
               ),
+            ),
+            if (visible.isEmpty)
               SliverToBoxAdapter(
-                child: _ReviewEntry(
-                  palette: ll,
-                  dueCount: _dueCount,
-                  onTap: _startReview,
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: _PlanSection(
-                  palette: ll,
-                  entries: plan,
-                  emptyText: s.vocabTodayPlanEmpty,
-                  onStartDrill: _startDrill,
-                  onStartReview: (entry) =>
-                      _startReview(onlyItemId: entry.item.id),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: _FilterBar(
-                  palette: ll,
-                  selected: _filter,
-                  labels: <VocabularyStatus?, (String, int)>{
-                    null: (s.vocabAll, items.length),
-                    VocabularyStatus.candidate: (
-                      s.vocabStatusLabel('candidate'),
-                      widget.store.candidateCount,
-                    ),
-                    VocabularyStatus.learning: (
-                      s.vocabStatusLabel('learning'),
-                      widget.store.learningCount,
-                    ),
-                    VocabularyStatus.known: (
-                      s.vocabStatusLabel('known'),
-                      widget.store.knownCount,
-                    ),
-                  },
-                  onSelect: (value) => setState(() => _filter = value),
-                ),
-              ),
-              if (visible.isEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(LLSpacing.xxl),
-                    child: Center(
-                      child: Text(
-                        s.vocabNoItemsForFilter,
-                        style: TextStyle(fontSize: 13, color: ll.textTertiary),
-                      ),
+                child: Padding(
+                  padding: const EdgeInsets.all(LLSpacing.xxl),
+                  child: Center(
+                    child: Text(
+                      s.vocabNoItemsForFilter,
+                      style: TextStyle(fontSize: 13, color: ll.textTertiary),
                     ),
                   ),
-                )
-              else
-                SliverList(
-                  delegate: SliverChildBuilderDelegate((context, i) {
-                    if (i.isOdd) {
-                      // 分隔线从文字左边缘起画 —— 与设置页一级页同一套视觉语言。
-                      return Divider(color: ll.divider, height: 1, indent: 20);
-                    }
-                    final item = visible[i ~/ 2];
-                    return _VocabularyRow(
-                      key: Key('vocab-item-${item.id}'),
-                      palette: ll,
-                      item: item,
-                      reason: _reasonFor(plan, item.id),
-                      onTap: () => _showEvidence(item),
-                      onStartLearning: () =>
-                          widget.store.startLearning(item.id),
-                      onMarkKnown: () => widget.store.markKnown(item.id),
-                      onIgnore: () => widget.store.ignore(item.id),
-                      onRestore: () => widget.store.setStatus(
-                        item.id,
-                        VocabularyStatus.candidate,
-                      ),
-                      onDelete: () => _confirmDelete(item),
-                      onAiCheck:
-                          widget.aiGovernorService != null &&
-                              (item.status == VocabularyStatus.learning ||
-                                  item.status == VocabularyStatus.known)
-                          ? () => _startAiCheck(item)
-                          : null,
-                    );
-                  }, childCount: visible.length * 2 - 1),
                 ),
-              const SliverPadding(
-                padding: EdgeInsets.only(bottom: LLSpacing.huge),
+              )
+            else
+              SliverList(
+                delegate: SliverChildBuilderDelegate((context, i) {
+                  if (i.isOdd) {
+                    // 分隔线从文字左边缘起画 —— 与设置页一级页同一套视觉语言。
+                    return Divider(color: ll.divider, height: 1, indent: 20);
+                  }
+                  final item = visible[i ~/ 2];
+                  return _VocabularyRow(
+                    key: Key('vocab-item-${item.id}'),
+                    palette: ll,
+                    item: item,
+                    reason: _reasonFor(plan, item.id),
+                    onTap: () => _showEvidence(item),
+                    onStartLearning: () =>
+                        widget.store.startLearning(item.id),
+                    onMarkKnown: () => widget.store.markKnown(item.id),
+                    onIgnore: () => widget.store.ignore(item.id),
+                    onRestore: () => widget.store.setStatus(
+                      item.id,
+                      VocabularyStatus.candidate,
+                    ),
+                    onDelete: () => _confirmDelete(item),
+                    onAiCheck:
+                        widget.aiGovernorService != null &&
+                            (item.status == VocabularyStatus.learning ||
+                                item.status == VocabularyStatus.known)
+                        ? () => _startAiCheck(item)
+                        : null,
+                    governor: widget.aiGovernorService,
+                  );
+                }, childCount: visible.length * 2 - 1),
               ),
-            ],
-          );
-        },
-      ),
+            const SliverPadding(
+              padding: EdgeInsets.only(bottom: LLSpacing.huge),
+            ),
+          ],
+        );
+      },
+    )
     );
   }
 
@@ -283,11 +301,7 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
     final s = LLStrings.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final exportable = widget.store.items
-        .where(
-          (i) =>
-              i.status == VocabularyStatus.learning ||
-              i.status == VocabularyStatus.known,
-        )
+        .where((i) => isExportableVocabularyStatus(i.status))
         .toList(growable: false);
     if (exportable.isEmpty) {
       messenger.showSnackBar(
@@ -333,22 +347,174 @@ class _VocabularyBookScreenState extends State<VocabularyBookScreen> {
           }
         },
       );
-      final saved = await FilePicker.platform.saveFile(
+      await shareApkgBytes(
         fileName: 'listenloop_vocab.apkg',
         bytes: Uint8List.fromList(bytes),
+        shareSubject: '句读 生词卡',
+        shareText: '句读 导出的生词 .apkg，可导入 Anki 桌面端复习。',
       );
-      if (saved != null && mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(s.vocabExportDone(notes.length))),
         );
       }
-    } catch (_) {
-      messenger.showSnackBar(SnackBar(content: Text(s.vocabExportFailed)));
+    } on ApkgShareException {
+      // 用户取消分享：不算失败，不提示。
+    } catch (e, st) {
+      debugPrint('[apkg-export] threw: $e\n$st');
+      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
     }
   }
 
   static String _slug(String surface) =>
       surface.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+
+  /// 导出学习数据备份（JSON）—— 生词本 FSRS + 弱点 + 挖卡 + 偏好。
+  ///
+  /// 与 [_exportApkg] 区分：这是"用户状态备份"（换机/重装可恢复），
+  /// `.apkg` 是"知识库导出"（给 Anki 复习）。
+  Future<void> _exportBackup() async {
+    final s = LLStrings.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final governor = widget.aiGovernorService ?? AiGovernorService();
+    final prefs = PreferencesScope.maybeOf(context);
+    final store = widget.store;
+
+    if (store.items.isEmpty) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(s.dataBackupNoData)),
+      );
+      return;
+    }
+
+    try {
+      await exportBackup(
+        store: store,
+        governor: governor,
+        prefs: prefs,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.dataBackupDone)),
+        );
+      }
+    } on BackupShareCancelled {
+      // 用户取消分享：不算失败，不提示。
+    } catch (e, st) {
+      debugPrint('[data-backup] threw: $e\n$st');
+      messenger.showSnackBar(SnackBar(content: Text('备份失败：$e')));
+    }
+  }
+
+  /// 导入学习数据备份（JSON）—— 换机/重装后把 `.json` 选回来恢复。
+  ///
+  /// 闭环：选文件 → 校验 schemaVersion → 预览（合并/覆盖确认）→ 写盘。
+  /// 与 [_exportBackup] 配对，构成 L2 手动迁移的完整回路。
+  Future<void> _importBackup() async {
+    final s = LLStrings.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    // 偏好 controller 提前取，避免 async gap 后依赖 context。
+    final prefsController = PreferencesScope.of(context);
+    final ImportedBackup backup;
+    try {
+      backup = await pickAndDecodeBackup();
+    } on BackupImportCancelled {
+      return; // 用户主动取消，不算失败。
+    } on BackupImportException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    } catch (e, st) {
+      debugPrint('[data-import] threw: $e\n$st');
+      messenger.showSnackBar(SnackBar(content: Text(s.dataImportFailed)));
+      return;
+    }
+
+    if (!mounted) return;
+    final payload = backup.payload;
+    if (payload.vocabularyItems.isEmpty) {
+      messenger.showSnackBar(SnackBar(content: Text(s.dataImportNoItems)));
+      return;
+    }
+
+    // 预览：本机有多少会被跳过。
+    final localSurfaces = {
+      for (final it in widget.store.items) it.surfaceForm,
+    };
+    final wouldSkip = payload.vocabularyItems
+        .where((i) => localSurfaces.contains(i.surfaceForm))
+        .length;
+    final merged = payload.vocabularyItems.length - wouldSkip;
+
+    // 合并 / 覆盖 二选一。
+    final choice = await showDialog<_ImportChoice>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.ll.surface,
+        title: Text(
+          '${s.dataImportConfirmTitle}（${backup.sourceName}）',
+          style: const TextStyle(fontSize: 16),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              s.dataImportPreview(merged, wouldSkip),
+              style: TextStyle(fontSize: 14, color: context.ll.textSecondary),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              s.dataImportConfirmBody,
+              style: TextStyle(fontSize: 13, color: context.ll.textTertiary),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              s.dataImportOverwriteWarning,
+              style: TextStyle(fontSize: 13, color: context.ll.textTertiary),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_ImportChoice.cancel),
+            child: Text(s.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_ImportChoice.merge),
+            child: Text(s.dataImportConfirmMerge),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_ImportChoice.overwrite),
+            child: Text(
+              s.dataImportConfirmOverwrite,
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || choice == _ImportChoice.cancel) return;
+
+    try {
+      if (choice == _ImportChoice.overwrite) {
+        importVocabularyOverwrite(payload, widget.store);
+      } else {
+        importVocabulary(payload, widget.store);
+      }
+      // 偏好只恢复脱敏字段（key 永不写入）；controller 缺失时静默跳过。
+      await importPreferences(payload, prefsController);
+    } catch (e, st) {
+      debugPrint('[data-import] apply threw: $e\n$st');
+      messenger.showSnackBar(SnackBar(content: Text(s.dataImportFailed)));
+      return;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(s.dataImportDone)),
+      );
+    }
+  }
 
   PlanReason? _reasonFor(List<VocabularyPlanEntry> plan, String itemId) {
     for (final entry in plan) {
@@ -698,6 +864,7 @@ class _VocabularyRow extends StatelessWidget {
     required this.onRestore,
     required this.onDelete,
     this.onAiCheck,
+    this.governor,
   });
 
   final LLPalette palette;
@@ -713,6 +880,10 @@ class _VocabularyRow extends StatelessWidget {
   /// AI 检查（10 号 §五）—— null 时不显示菜单项（未注入网关 /
   /// 候选池与已忽略的词没有检查意义）。
   final VoidCallback? onAiCheck;
+
+  /// AI 反馈通道（10 号 §五「意思回忆」）—— 由 Library 注入，
+  /// null 时回忆页走静态自比兜底，复习流程不断。
+  final AiGovernorService? governor;
 
   @override
   Widget build(BuildContext context) {
@@ -794,6 +965,26 @@ class _VocabularyRow extends StatelessWidget {
                     onRestore();
                   case 'delete':
                     onDelete();
+                  case 'meaning_recall':
+                    final occ = item.latestOccurrence;
+                    if (occ == null) break;
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => MeaningRecallScreen(
+                          sentence: Sentence(
+                            id: occ.sentenceId,
+                            index: occ.sentenceIndex,
+                            startMs: occ.startMs,
+                            endMs: occ.endMs,
+                            english: occ.sentenceText,
+                            chinese: item.chineseGloss ?? '',
+                          ),
+                          // AI 反馈通道（10 号红线：AI 故障不得阻塞复习）：
+                          // governor 由 Library 注入，为空时页面走静态自比兜底。
+                          governor: governor,
+                        ),
+                      ),
+                    );
                 }
               },
               itemBuilder: (context) => <PopupMenuEntry<String>>[
@@ -811,6 +1002,11 @@ class _VocabularyRow extends StatelessWidget {
                 else
                   PopupMenuItem(value: 'ignore', child: Text(s.vocabIgnore)),
                 PopupMenuItem(value: 'delete', child: Text(s.vocabDelete)),
+                if (item.status == VocabularyStatus.learning ||
+                    item.status == VocabularyStatus.known)
+                  PopupMenuItem(
+                      value: 'meaning_recall',
+                      child: Text(s.mrTitle)),
               ],
             ),
           ],

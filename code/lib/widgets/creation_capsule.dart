@@ -168,7 +168,7 @@ class _CreationCapsuleState extends State<CreationCapsule>
                   ),
                 ];
               } else {
-                bgColor = palette.surface;
+                bgColor = palette.bg;
                 if (isNearlyComplete) {
                   final glow = _pulseAnimation.value;
                   shadows = [
@@ -224,8 +224,8 @@ class _CreationCapsuleState extends State<CreationCapsule>
                               ? Colors.greenAccent
                               : (isNearlyComplete
                                   ? const Color(0xFF00E5FF)
-                                  : palette.divider),
-                          width: 1.5,
+                                  : palette.textTertiary),
+                          width: 1,
                         ),
                         boxShadow: shadows,
                       ),
@@ -289,11 +289,13 @@ class _CreationCapsuleState extends State<CreationCapsule>
       child: Stack(
         alignment: Alignment.center,
         children: [
+          // Single white progress arc — no background track, so only ONE line
+          // is ever visible (the "two lines" came from the full-circle
+          // `backgroundColor` track underneath the progress arc).
           CircularProgressIndicator(
             value: progress <= 0 ? null : progress,
             strokeWidth: 3,
-            color: progress >= 0.85 ? const Color(0xFF00E5FF) : palette.textPrimary,
-            backgroundColor: palette.divider,
+            color: Colors.white,
           ),
           Text(
             '$percent',

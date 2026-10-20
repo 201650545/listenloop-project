@@ -1,0 +1,390 @@
+/// v1 学习计划 —— **纯本地规则映射，不依赖任何 AI**。
+///
+/// 设计依据：`docs/02_工程架构与系统设计/10_生词本与Anki记忆卡设计.md` §十四。
+///
+/// 范围（v1 刻意做小）：
+///   * 输入信号只取两类 —— **听写证据**（来自 `DictationEngine`）＋ **手动点存**；
+///   * 组件只用白名单里 [StudyComponent] 的前四个（全部本地可判定）；
+///   * **不做** AI 出题、不做开放答案评判、不做多次到期的节奏编排。
+///
+/// 三条硬约束（对应 §14.1）：
+///   1. 一个词一次**最多 2 个组件**；
+///   2. 受 SRS 配额约束（新卡 [newQuota] / 复习 [reviewQuota]）；
+///   3. 每个组件都能回答「因为哪条证据」——由 [VocabularyPlanEntry.reason] 唯一出口给出，
+///      UI 不得自己拼条件。
+///
+/// ⚠️ 一条**超出原表**的补充规则（已在此显式标注）：
+/// [DictationDiffType.extra]（多写）在设计文档的规则表里没有出现。
+/// 多写意味着用户听到了原文里没有的东西，属**听辨**问题而非拼写问题，
+/// 因此按听辨处理但**只给原声回听、不给重听写**——因为「重写一遍」
+/// 对「多写」并没有针对性（他不知道该少写哪个）。命中（`matched`）则什么都不出。
+library;
+
+import '../models/vocabulary_model.dart';
+import 'dictation_engine.dart';
+import 'word_frequency.dart';
+
+/// 学习组件白名单。
+///
+/// v1 **只实现前四个**；[StudyComponent.srsReview] 仅用于已掌握且到期的词。
+enum StudyComponent {
+  /// 回原声听 —— 必须用**原片句轴音频**，不允许用 TTS 合成音替代（08 定调红线）。
+  originalRelisten,
+
+  /// 重听写这一句。
+  dictationRetry,
+
+  /// 英文 Cloze 回忆（拼写/形态类问题的针对性练习）。
+  clozeRecall,
+
+  /// 形态纠错展示 —— 只展示正确形态，**不判开放答案**（v1 边界）。
+  morphologyNote,
+
+  /// AI 出题：原语境理解 + 新语境产出（10 号 §五 / §6.2 白名单第 5 项）。
+  ///
+  /// **不在 planner 的本地规则里出现** —— AI 可用性只有 UI 层知道；
+  /// 入口是生词本管理页的「AI 检查」，执行页在 AI 不可用时降级为跳过。
+  contextTransfer,
+
+  /// 纯 SRS 到期待复习。
+  srsReview;
+
+  static StudyComponent parse(String? raw) => StudyComponent.values.firstWhere(
+    (v) => v.name == raw,
+    orElse: () => StudyComponent.originalRelisten,
+  );
+}
+
+/// 出这些组件的**唯一原因**。
+///
+/// 验收标准第 2 条要求「每个组件都能回答因为哪条证据」——所以原因
+/// 由引擎给出而不是 UI 推断，避免两处条件判断漂移。
+enum PlanReason {
+  /// 可靠听写证据（漏词/替换/合并/拆分）→ 听辨问题。
+  reliableHearing,
+
+  /// 只有「多写」——本表未覆盖，按听辨处理但只回原声（见文件头说明）。
+  extraOnly,
+
+  /// 只有拼写问题 —— **不判听力差**。
+  spellingOnly,
+
+  /// 只有词尾形态问题。
+  morphologyOnly,
+
+  /// 对齐不可靠 —— 只回原声，禁止派发精确词训练。
+  uncertainOnly,
+
+  /// 只有手动点存、没有其它证据 —— 按 v1 规则**什么都不出**，留在候选池。
+  tapOnly,
+
+  /// 已判「会」且 SRS 到期。
+  knownDue,
+
+  /// 已判「会」但未到期 / 已忽略 —— 什么都不出。
+  settled;
+
+  static PlanReason parse(String? raw) => PlanReason.values.firstWhere(
+    (v) => v.name == raw,
+    orElse: () => PlanReason.tapOnly,
+  );
+}
+
+/// 一个词的今日计划条目。
+class VocabularyPlanEntry {
+  const VocabularyPlanEntry({
+    required this.item,
+    required this.components,
+    required this.reason,
+  });
+
+  final VocabularyItem item;
+
+  /// 建议组件，最多 2 个（由引擎保证）。
+  final List<StudyComponent> components;
+
+  final PlanReason reason;
+
+  /// 建议的**主导一句**要不要展示 —— 空条目不应出现在 UI 里。
+  bool get isActionable => components.isNotEmpty;
+
+  @override
+  String toString() =>
+      'VocabularyPlanEntry(${item.surfaceForm} → ${components.map((c) => c.name).join('+')}, ${reason.name})';
+}
+
+/// v1 计划生成器。
+class VocabularyPlanner {
+  const VocabularyPlanner({this.newQuota = 5, this.reviewQuota = 30});
+
+  /// 新词（候选池升上来的）单次计划上限。
+  final int newQuota;
+
+  /// 复习（已在学习队列 / 已掌握到期）单次计划上限。
+  final int reviewQuota;
+
+  /// 生成今日计划。
+  ///
+  /// [dueAt] 缺省时读词条自己的 SRS 卡（`item.srs?.dueAt`）—— 调度挂在
+  /// **Item 级（一个词一张卡）**，所以计划不需要额外传参就能与复习对齐。
+  /// 没有卡（`srs == null`）时返回 null，已掌握的词一律不出组件：
+  /// 宁可少出，也不凭空声称「到期」。
+  ///
+  /// [frequency]（可选）：词频表。**只在候选池之间调整出现顺序**（低频优先，
+  /// §20.4 P0），用于决定「新卡配额」里先练哪 5 个。传 null 时保持原顺序
+  /// （最近见到优先），不改变任何既有行为。
+  ///
+  /// 三条边界（§20.3/§20.4，必须守住）：
+  ///   * 词频**不参与** SRS 间隔数学 —— 不动 `dueAt` / `easeFactor` / `intervalDays`；
+  ///   * 词频**不覆盖**听写证据规则 —— 高频词听错了照样出「原声回听」，
+  ///     因为「听不清高频词」恰恰是听力问题，不能因为「这词常见」就不练；
+  ///   * 词频**不改**队列构成 —— 到期的就是到期，低频词不会把没到期的卡拉进来。
+  List<VocabularyPlanEntry> build(
+    Iterable<VocabularyItem> items, {
+    DateTime? now,
+    DateTime? Function(VocabularyItem item)? dueAt,
+    WordFrequency? frequency,
+  }) {
+    final stamp = now ?? DateTime.now();
+    final resolveDue = dueAt ?? _defaultDueAt;
+    final out = <VocabularyPlanEntry>[];
+    var newUsed = 0;
+    var reviewUsed = 0;
+
+    // 候选池之间：低频优先（词频越罕见越该先练），同优先级按最近见到倒序；
+    // 非候选词：保持最近见到倒序。与生词本列表同一观感，避免两处不一致。
+    final sorted = items.toList()..sort((a, b) {
+      if (frequency != null &&
+          a.status == VocabularyStatus.candidate &&
+          b.status == VocabularyStatus.candidate) {
+        final pa = frequency.priorityOf(a.surfaceForm);
+        final pb = frequency.priorityOf(b.surfaceForm);
+        if (pa != pb) return pb.compareTo(pa);
+      }
+      return b.lastSeenAt.compareTo(a.lastSeenAt);
+    });
+
+    for (final item in sorted) {
+      if (item.status == VocabularyStatus.ignored) continue;
+
+      if (item.status == VocabularyStatus.known) {
+        final due = resolveDue(item);
+        if (due == null || due.isAfter(stamp)) continue;
+        if (reviewUsed >= reviewQuota) continue;
+        reviewUsed++;
+        out.add(
+          VocabularyPlanEntry(
+            item: item,
+            components: const <StudyComponent>[StudyComponent.srsReview],
+            reason: PlanReason.knownDue,
+          ),
+        );
+        continue;
+      }
+
+      final entry = _drillFor(item);
+      if (entry == null) continue;
+
+      // 候选池算「新词」配额；学习中的算复习配额。
+      final isNew = item.status == VocabularyStatus.candidate;
+      if (isNew && newUsed >= newQuota) continue;
+      if (!isNew && reviewUsed >= reviewQuota) continue;
+      if (isNew) {
+        newUsed++;
+      } else {
+        reviewUsed++;
+      }
+      out.add(entry);
+    }
+
+    return out;
+  }
+
+  /// 单词语音/拼写训练规则表（§14.1 的全部行 + 一条显式补充）。
+  VocabularyPlanEntry? _drillFor(VocabularyItem item) {
+    final dictation = item.occurrences
+        .where((o) => o.source == VocabularySource.dictation)
+        .toList(growable: false);
+
+    // 只有手动点存（或干脆没有证据）：留候选池，不出组件——防止把
+    // 「随手收藏」立刻变成复习债务（§14 硬约束 ③）。
+    if (dictation.isEmpty) return null;
+
+    // 存在对齐不可靠的听写：只回原声。此时派发「重听写」等于伪造精确诊断。
+    if (dictation.any((o) => o.uncertain)) {
+      return _entry(item, const <StudyComponent>[
+        StudyComponent.originalRelisten,
+      ], PlanReason.uncertainOnly);
+    }
+
+    final types = <DictationDiffType>{
+      for (final o in dictation)
+        if (o.dictationDiffType != null)
+          DictationDiffType.values.firstWhere(
+            (t) => t.name == o.dictationDiffType,
+            orElse: () => DictationDiffType.matched,
+          ),
+    };
+
+    final hearing = <DictationDiffType>{
+      DictationDiffType.missing,
+      DictationDiffType.replaced,
+      DictationDiffType.merged,
+      DictationDiffType.split,
+    };
+    if (types.any(hearing.contains)) {
+      return _entry(item, const <StudyComponent>[
+        StudyComponent.originalRelisten,
+        StudyComponent.dictationRetry,
+      ], PlanReason.reliableHearing);
+    }
+
+    // 补充规则：只有「多写」→ 只回原声（见文件头）。
+    if (types.contains(DictationDiffType.extra)) {
+      return _entry(item, const <StudyComponent>[
+        StudyComponent.originalRelisten,
+      ], PlanReason.extraOnly);
+    }
+
+    // 拼写问题：只给 Cloze，**不判听力差**。
+    if (types.contains(DictationDiffType.spelling)) {
+      return _entry(item, const <StudyComponent>[
+        StudyComponent.clozeRecall,
+      ], PlanReason.spellingOnly);
+    }
+
+    if (types.contains(DictationDiffType.morphology)) {
+      return _entry(item, const <StudyComponent>[
+        StudyComponent.morphologyNote,
+        StudyComponent.clozeRecall,
+      ], PlanReason.morphologyOnly);
+    }
+
+    // 只剩「命中」：没有可训练的错误。
+    return null;
+  }
+
+  VocabularyPlanEntry _entry(
+    VocabularyItem item,
+    List<StudyComponent> components,
+    PlanReason reason,
+  ) {
+    // 上限 2 个组件 —— 在引擎里强制，不依赖调用方自觉。
+    final capped = components.length > maxComponentsPerItem
+        ? components.sublist(0, maxComponentsPerItem)
+        : components;
+    return VocabularyPlanEntry(
+      item: item,
+      components: List<StudyComponent>.unmodifiable(capped),
+      reason: reason,
+    );
+  }
+
+  /// 一个词一次最多 2 个组件（§14.1 硬约束 ①）。
+  static const int maxComponentsPerItem = 2;
+
+  /// 默认到期来源：**Item 级 SRS 卡**（派生规则 3）。
+  static DateTime? _defaultDueAt(VocabularyItem item) => item.srs?.dueAt;
+}
+
+/// 闪卡复习队列 —— **一个词一张卡**（派生规则 3）。
+///
+/// 与今日计划的分工：
+///   * 今日计划回答"今天该练什么"（听辨/拼写/形态的针对性练习）；
+///   * 复习队列回答"哪些卡到期了"（纯记忆调度）。
+///
+/// 配额沿用 07 号文档的建议：新卡 [newQuota] 张、复习 [reviewQuota] 张 ——
+/// 上限存在的意义是**防复习债滚雪球**，不是省事。
+/// 配额沿用 07 号文档的建议：新卡 [newQuota] 张、复习 [reviewQuota] 张 ——
+/// 上限存在的意义是**防复习债滚雪球**，不是省事。
+class VocabularyReviewQueue {
+  static const int newQuota = 5;
+  static const int reviewQuota = 30;
+
+  final int newLimit;
+  final int reviewLimit;
+
+  /// 07 号 §三.2 弱项优先（差异化卖点）。
+  ///
+  /// 07 原文按「错误率 × 到期权重」排序（弱项类型卡片提前出现）—— 那是
+  /// 句子级卡的口径（音变类型挂句上）；Item 级词卡的对应物：
+  /// * 错误信号 = SRS 遗忘次数 + ease 低 + 练习失败（`VocabularyDrillLog`）
+  /// * 到期权重 = 拖欠天数线性封顶（防止久拖强卡被新弱卡**永久**压住）
+  ///
+  /// 排序只改**出现顺序与配额占用**（>reviewLimit 截断时弱项先占坑），
+  /// 不改队列构成 —— 到期就是到期，弱项不会把没到期的卡拉进来。
+  final bool weaknessFirst;
+
+  const VocabularyReviewQueue({
+    this.newLimit = newQuota,
+    this.reviewLimit = reviewQuota,
+    this.weaknessFirst = true,
+  });
+
+  /// 错误信号分（07 的「错误率」在词卡上的对应物）。
+  ///
+  /// 权重为设计参数（07 原文只给公式未给数值）：一次遗忘 1 分；
+  /// ease 每低 0.1 约 0.1 分（2.5 基线 → 0.5 分，下限 1.3 → 1.7 分）；
+  /// 练习失败每次 0.5、封顶 2 分 —— 防止反复刷同一组件把分刷上天。
+  static double weaknessScore(VocabularyItem item) {
+    final srs = item.srs;
+    var score = 0.0;
+    if (srs != null) {
+      score += srs.lapses * 1.0 + (3.0 - srs.easeFactor);
+    }
+    final failures =
+        (item.drills.where((d) => !d.passed).length.clamp(0, 4)).toDouble() *
+            0.5;
+    return score + failures;
+  }
+
+  /// 到期权重：拖欠越久越急，线性 0~2 封顶（30 天）。
+  static double overdueWeight(DateTime dueAt, DateTime now) {
+    final days = now.difference(dueAt).inMilliseconds / 86400000.0;
+    if (days <= 0) return 0;
+    return (days > 30 ? 30 : days) / 30.0 * 2.0;
+  }
+
+  /// 组装本轮复习队列：**先到期、后新卡**。
+  ///
+  /// 候选池不算数（还没确认要学，不该背复习债），已忽略的也不算。
+  List<VocabularyItem> build(Iterable<VocabularyItem> items, {DateTime? now}) {
+    final stamp = now ?? DateTime.now();
+    final due = <VocabularyItem>[];
+    final fresh = <VocabularyItem>[];
+
+    for (final item in items) {
+      // 候选池整体排除 —— 哪怕他手里已经有一张卡：用户把它退回候选池，
+      // 就是"暂时不想学"，此时再拿复习卡催他等于自己制造复习债。
+      if (item.status == VocabularyStatus.candidate) continue;
+      if (item.status == VocabularyStatus.ignored) continue;
+      final srs = item.srs;
+      if (srs == null) {
+        // 没有卡：只有进了学习队列的才算"新卡"
+        if (item.status == VocabularyStatus.learning ||
+            item.status == VocabularyStatus.known) {
+          fresh.add(item);
+        }
+        continue;
+      }
+      if (srs.isDue(stamp)) due.add(item);
+    }
+
+    if (weaknessFirst) {
+      // 弱项优先（07 §三.2）：错误信号 × 到期权重 组合键降序，
+      // 同分按 dueAt 升序 —— 排序必须稳定可复现。
+      due.sort((a, b) {
+        final ka = weaknessScore(a) + overdueWeight(a.srs!.dueAt, stamp);
+        final kb = weaknessScore(b) + overdueWeight(b.srs!.dueAt, stamp);
+        final byScore = kb.compareTo(ka);
+        if (byScore != 0) return byScore;
+        return a.srs!.dueAt.compareTo(b.srs!.dueAt);
+      });
+    } else {
+      due.sort((a, b) => a.srs!.dueAt.compareTo(b.srs!.dueAt));
+    }
+    fresh.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    return <VocabularyItem>[...due.take(reviewLimit), ...fresh.take(newLimit)];
+  }
+}

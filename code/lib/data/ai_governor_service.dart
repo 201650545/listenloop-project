@@ -15,8 +15,13 @@ import '../preferences/app_preferences.dart';
 /// 2. Weakness & review persistence.
 /// 3. Anki Spaced Repetition (SM-2) Card Deck & Review Management.
 /// 4. Contextual AI Tutor dialogue — REAL online LLM via an OpenAI-compatible
-///    endpoint (defaults to the local gateway on :3100, reached from the phone
-///    through `adb reverse`), with the offline engine as a graceful fallback.
+///    endpoint (defaults to the MiMo public API on the phone, see
+///    `kDefaultTutorBaseUrl`; multi-line fallback chains keep throttled
+///    routes from becoming dead ends), with the offline engine as a
+///    graceful fallback.
+///
+/// NOTE: the old "local gateway on :3100 via adb reverse" default was
+/// replaced on 2026-09-23 — the phone now reaches AI directly without a PC.
 class AiGovernorService extends ChangeNotifier {
   AiGovernorService({
     this.prefs,
@@ -74,8 +79,9 @@ class AiGovernorService extends ChangeNotifier {
   /// Base URL of the OpenAI-compatible endpoint (`/v1` included).
   ///
   /// Preference storage wins (Settings writes it); otherwise falls back to the
-  /// injected [AppPreferences], whose defaults already point at the local
-  /// gateway — so the service works even with no storage wired up.
+  /// injected [AppPreferences], whose defaults point at the MiMo public API
+  /// (see `kDefaultTutorBaseUrl`) — so the service works even with no storage
+  /// wired up and no PC around.
   String get tutorBaseUrl {
     final stored = prefs?.getString(_tutorBaseUrlStorageKey)?.trim();
     if (stored != null && stored.isNotEmpty) return stored;

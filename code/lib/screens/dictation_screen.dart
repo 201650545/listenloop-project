@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../data/ai_governor_service.dart';
 import '../l10n/ll_strings.dart';
+import '../models/sentence.dart';
 import '../player/sentence_player_controller.dart';
 import '../theme/listenloop_theme.dart';
 import '../training/dictation_engine.dart';
 import '../training/dictation_session.dart';
+import '../widgets/ll_page.dart';
+import 'meaning_recall_drill_screen.dart';
 
 /// 听写页 —— 核心层（P1）。
 ///
@@ -15,10 +19,18 @@ import '../training/dictation_session.dart';
 ///   * **对齐不可靠时降级**：只给整体结果，不伪造逐词三色标注。
 ///   * **不读 TTS**：只用原片句轴音频，听写考的就是真实语流。
 class DictationScreen extends StatefulWidget {
-  const DictationScreen({super.key, required this.controller});
+  const DictationScreen({
+    super.key,
+    required this.controller,
+    this.governor,
+  });
 
   /// 复用精听页的播放控制器 —— 保证听的是同一份原声句轴。
   final SentencePlayerController controller;
+
+  /// AI Governor（可选）：注入后批改出的错句可一键接进「意思回忆」在线 AI 反馈。
+  /// 未注入时听写主流程完全不受影响 —— 入口按红线静默降级。
+  final AiGovernorService? governor;
 
   @override
   State<DictationScreen> createState() => _DictationScreenState();
@@ -105,21 +117,86 @@ class _DictationScreenState extends State<DictationScreen> {
     _clearInputs();
   }
 
+  /// 收集听写批改出的「待打磨」错句，供 [MeaningRecallDrillScreen] 使用。
+  ///
+  /// 数据红线（对齐批改契约）：
+  ///   * 只收「有错且对齐可靠（`uncertain == false`）」的行；
+  ///   * 留空句是合法答案、对齐不可靠的行不伪造诊断 —— 都不进这里，
+  ///     留在听写里回原声重听；
+  ///   * 按句去重、按课内顺序输出，不会因某段反复重写而堆积。
+  List<Sentence> _drillSentences() => _collectTargets(productionOnly: true);
+
+  /// ListenRetryTarget：留空句 + 对齐不可靠句（isBlank || uncertain）。
+  ///
+  /// v0.9.1（17 号路线图）：这些句子的观测证据是「没听清/对齐崩了」，
+  /// 正确的后续是**回原声重听**，不是产出训练。此前 reviewTargets 和
+  /// _drillSentences 都不含它们，导致这类句子在完成流里断了——补上出口。
+  List<Sentence> _retrySentences() => _collectTargets(retryOnly: true);
+
+  /// 统一的完成流目标收集器。[productionOnly] 取产出目标（错误且可靠），
+  /// [retryOnly] 取重听目标（留空或 uncertain）。两者互斥不重叠。
+  List<Sentence> _collectTargets({
+    bool productionOnly = false,
+    bool retryOnly = false,
+  }) {
+    assert(!(productionOnly && retryOnly));
+    final seen = <int>{};
+    final out = <Sentence>[];
+    final completed = _session.completedSegmentResults;
+    for (final entry in completed.entries) {
+      final segmentIndex = entry.key;
+      final segment = entry.value;
+      for (var offset = 0; offset < segment.lines.length; offset++) {
+        final line = segment.lines[offset];
+        final isProduction = !line.uncertain && !line.isBlank && line.errorCount > 0;
+        final isRetry = line.isBlank || line.uncertain;
+        final matches = productionOnly ? isProduction : (retryOnly ? isRetry : false);
+        if (!matches) continue;
+        final abs = segmentIndex * _session.segmentLength + offset;
+        if (abs < 0 || abs >= _session.sentences.length) continue;
+        if (!seen.add(abs)) continue; // 去重
+        out.add(_session.sentences[abs]);
+      }
+    }
+    return out;
+  }
+
+  /// 打开「意思回忆」错句队列。无 governor 也照常进入 —— 走静态自比兜底。
+  void _openDrill() {
+    final sentences = _drillSentences();
+    if (sentences.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MeaningRecallDrillScreen(
+          sentences: sentences,
+          governor: widget.governor,
+        ),
+      ),
+    );
+  }
+
+  /// 回原声重听 [sentences] 中的第一句（ListenRetryTarget 的最小实现）：
+  /// 返回听写页并让播放器定位到该句开头播放。后续版本可升级成重听队列。
+  void _relistenFirst(List<Sentence> sentences) {
+    if (sentences.isEmpty) return;
+    final first = sentences.first;
+    final abs = _session.sentences.indexOf(first);
+    if (abs < 0) return;
+    Navigator.of(context).pop(abs); // 带句子下标回精听页
+  }
+
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
     final s = LLStrings.of(context);
 
-    return Scaffold(
-      backgroundColor: ll.bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _header(ll, s),
-            Expanded(child: _body(ll, s)),
-            _footer(ll, s),
-          ],
-        ),
+    return LLPage(
+      body: Column(
+        children: [
+          _header(ll, s),
+          Expanded(child: _body(ll, s)),
+          _footer(ll, s),
+        ],
       ),
     );
   }
@@ -226,6 +303,7 @@ class _DictationScreenState extends State<DictationScreen> {
                 ),
                 const Spacer(),
                 GestureDetector(
+                  key: Key('dictation-unknown-$offset'),
                   onTap: () {
                     if (entry.markedUnknown) {
                       _session.setText(offset, _inputFor(offset).text);
@@ -585,6 +663,54 @@ class _DictationScreenState extends State<DictationScreen> {
               ),
           ],
         ),
+        // ── 完成流区域（v0.9.1）：diff 之后、主导航之前 ──
+        // 双出口（17 号路线图 / turn3 评审采纳）：
+        //   ProductionTarget → 「意思回忆」产出训练
+        //   ListenRetryTarget → 回原声重听
+        // 无任何后续动作时整块消失；不放 Banner/Modal/SnackBar。
+        if (_drillSentences().isNotEmpty) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('dictation-drill-entry'),
+              onPressed: _openDrill,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ll.textPrimary,
+                side: BorderSide(color: ll.divider),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: Icon(Icons.auto_awesome_outlined,
+                  size: 15, color: ll.textSecondary),
+              label: Text(
+                s.mrDrillEntry(_drillSentences().length),
+                style: const TextStyle(
+                    fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
+        if (_retrySentences().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const Key('dictation-relisten-entry'),
+              onPressed: () => _relistenFirst(_retrySentences()),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ll.textSecondary,
+                side: BorderSide(color: ll.divider),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: Icon(Icons.hearing_outlined,
+                  size: 15, color: ll.textTertiary),
+              label: Text(
+                s.dictationRelistenEntry(_retrySentences().length),
+                style: const TextStyle(fontSize: 12.5),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         Row(
           children: [

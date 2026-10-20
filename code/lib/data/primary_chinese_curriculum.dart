@@ -1222,20 +1222,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'qiejibing-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第一单元',
-          title: '会认字\n朗 雾 暴 雷 阵 冻 夹',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第一单元',
-          title: '会写字\n转 夹',
-        ),
-
-      ],
+],
     ),
 
     // 第二单元（识字）
@@ -1396,20 +1383,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'shierfanamingge-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第二单元',
-          title: '会认字\n丑 恨 诚 虚 假 漠 助 贫 富 饥 永',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第二单元',
-          title: '会写字\n丑 诚',
-        ),
-
-      ],
+],
     ),
 
     // 第三单元（课文）
@@ -1542,20 +1516,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'wangerxiao-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第三单元',
-          title: '会认字\n弹 钢 琴 捏 泥 围 滚 铁 环 滑 梯',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第三单元',
-          title: '会写字\n图 泥 铁 环',
-        ),
-
-      ],
+],
     ),
 
     // 第四单元（课文）
@@ -1717,20 +1678,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'huajiaxiang-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第四单元',
-          title: '会认字\n订 效 丰 昌 付 卧 铺 改 签 退 更 维 码',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第四单元',
-          title: '会写字\n号 丰',
-        ),
-
-      ],
+],
     ),
 
     // 第五单元（课文）
@@ -1863,20 +1811,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'kezhouqiujian-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第五单元',
-          title: '会认字\n轿 救 摩 托 防 渔 货 科 考 察',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第五单元',
-          title: '会写字\n货 科',
-        ),
-
-      ],
+],
     ),
 
     // 第六单元（课文）
@@ -2039,20 +1974,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'dayuzhishui-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第六单元',
-          title: '会认字\n锋 蜜 峰 蜂 爆 争 抄 炒 幕 墓 慕',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第六单元',
-          title: '会写字\n抄 炒',
-        ),
-
-      ],
+],
     ),
 
     // 第七单元（课文）
@@ -2179,20 +2101,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'fenbuqingshiyahaishixia-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第七单元',
-          title: '会认字\n漱 饿 沼 泽 宁 杠 杆 栋 库 闸 羔 蝗',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第七单元',
-          title: '会写字\n饥 饿 宁 库',
-        ),
-
-      ],
+],
     ),
 
     // 第八单元（课文）
@@ -2325,20 +2234,7 @@ class PrimaryChineseCurriculum {
           lessonId: 'hujiahuwei-b-dual',
           isDualMode: true,
         ),        // 语文园地的字取课本识字表/写字表同名行（无词语表条目）；既有 4 板块保持不动；无 lessonId
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第八单元',
-          title: '会认字\n狼 猩 鹤 蛇 鸽 蚕 蚯 蚓 骆 驼 狮',
-        ),
-        PrimaryChineseLesson(
-          grade: 2,
-          term: '上册',
-          unit: '第八单元',
-          title: '会写字\n狼 蛇',
-        ),
-
-      ],
+],
     ),
 
     // ==============================================================
@@ -3421,13 +3317,25 @@ class PrimaryChineseCurriculum {
       title: '语文园地一',
       // 字词取课本三张表原文（识字表/写字表/词语表，26春统编版）；无 lessonId，仅供查看
       subLessons: [
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第一单元',
-          title: '会写字\n匕 忆 艺 乙 冗 犬 税 兑 执',
+          title: '交流平台',
         ),
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第一单元',
+          title: '词句段运用',
+        ),
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第一单元',
+          title: '日积月累',
+        ),
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第一单元',
@@ -3682,13 +3590,25 @@ class PrimaryChineseCurriculum {
       title: '语文园地四',
       // 字词取课本三张表原文（识字表/写字表/词语表，26春统编版）；无 lessonId，仅供查看
       subLessons: [
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第四单元',
-          title: '会写字\n援 掷 投 捞 挤 揽 括 拓',
+          title: '交流平台',
         ),
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第四单元',
+          title: '词句段运用',
+        ),
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第四单元',
+          title: '日积月累',
+        ),
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第四单元',
@@ -3855,13 +3775,25 @@ class PrimaryChineseCurriculum {
       title: '语文园地六',
       // 字词取课本三张表原文（识字表/写字表/词语表，26春统编版）；无 lessonId，仅供查看
       subLessons: [
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第六单元',
-          title: '会写字\n旭 屿 舰 锚 瞭 巡',
+          title: '交流平台',
         ),
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第六单元',
+          title: '词句段运用',
+        ),
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第六单元',
+          title: '日积月累',
+        ),
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第六单元',
@@ -4028,13 +3960,25 @@ class PrimaryChineseCurriculum {
       title: '语文园地八',
       // 字词取课本三张表原文（识字表/写字表/词语表，26春统编版）；无 lessonId，仅供查看
       subLessons: [
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第八单元',
-          title: '会写字\n咳 嗽 唠 叨 吆 讽 诫 辩',
+          title: '交流平台',
         ),
-        PrimaryChineseLesson(
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第八单元',
+          title: '词句段运用',
+        ),
+PrimaryChineseLesson(
+          grade: 3,
+          term: '下册',
+          unit: '第八单元',
+          title: '日积月累',
+        ),
+PrimaryChineseLesson(
           grade: 3,
           term: '下册',
           unit: '第八单元',
@@ -4051,7 +3995,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '观潮',
-      lessonId: 'guanchao-b-dual',
+      lessonId: 'g4a-guanchao-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4079,7 +4023,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '现代诗二首（秋晚的江上·花牛歌）',
-      lessonId: 'xiandaishi2-b-dual',
+      lessonId: 'g4a-huaniuge-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4095,7 +4039,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '繁星',
-      lessonId: 'fanxing-b-dual',
+      lessonId: 'g4a-fanxing-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4111,7 +4055,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '语文园地一',
-      lessonId: 'g4a-yuandi1-b-dual',
+      lessonId: 'g4a-u1-yuandi-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4139,7 +4083,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '一个豆荚里的五粒豆',
-      lessonId: 'wulidou-b-dual',
+      lessonId: 'g4a-doudoulidawulidou-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4167,7 +4111,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '夜间飞行的秘密',
-      lessonId: 'yejianfeixing-b-dual',
+      lessonId: 'g4a-yejianfeixing-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4239,13 +4183,27 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '语文园地二',
+      lessonId: 'g4a-u2-yuandi-dual',
+      isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
           grade: 4,
           term: '上册',
           unit: '第二单元',
+          title: '交流平台',
+        ),
+        PrimaryChineseLesson(
+          grade: 4,
+          term: '上册',
+          unit: '第二单元',
+          title: '词句段运用',
+        ),
+        PrimaryChineseLesson(
+          grade: 4,
+          term: '上册',
+          unit: '第二单元',
           title: '善问好学名句（日积月累）',
-          lessonId: 'g4a-yuandi2-shanwen-b-dual',
+          lessonId: 'g4a-u2-yuandi-dual',
           isDualMode: true,
         ),
       ],
@@ -4257,7 +4215,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第三单元',
       title: '古诗三首（暮江吟·题西林壁·雪梅）',
-      lessonId: 'g4a-gushisan-shou3-dual',
+      lessonId: 'g4a-mujiangyin-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4335,6 +4293,8 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第三单元',
       title: '语文园地三',
+      lessonId: 'g4a-u3-yuandi-dual',
+      isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(grade: 4, term: '上册', unit: '第三单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -4452,6 +4412,8 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第四单元',
       title: '语文园地四',
+      lessonId: 'g4a-u4-yuandi-dual',
+      isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(grade: 4, term: '上册', unit: '第四单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -4538,6 +4500,8 @@ class PrimaryChineseCurriculum {
           term: '上册',
           unit: '第五单元',
           title: '我家的杏熟了（习作例文）',
+      lessonId: 'g4a-xingshizuowen1-dual',
+      isDualMode: true,
         ),
         PrimaryChineseLesson(
           grade: 4,
@@ -4628,6 +4592,8 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第六单元',
       title: '语文园地六',
+      lessonId: 'g4a-u6-yuandi-dual',
+      isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(grade: 4, term: '上册', unit: '第六单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -4757,6 +4723,8 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第七单元',
       title: '语文园地七',
+      lessonId: 'g4a-u7-yuandi-dual',
+      isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(grade: 4, term: '上册', unit: '第七单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -4780,7 +4748,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第八单元',
       title: '我将无我，不负人民',
-      lessonId: 'g4a-jiangwu-dual',
+      lessonId: 'g4a-wojiangwuwu-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4846,7 +4814,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第八单元',
       title: '古诗三首（凉州词·出塞·夏日绝句）',
-      lessonId: 'g4a-gushisan-shou4-dual',
+      lessonId: 'g4a-chusai-dual',
       isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(
@@ -4868,6 +4836,8 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第八单元',
       title: '语文园地八',
+      lessonId: 'g4a-u8-yuandi-dual',
+      isDualMode: true,
       subLessons: [
         PrimaryChineseLesson(grade: 4, term: '上册', unit: '第八单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -4962,14 +4932,34 @@ class PrimaryChineseCurriculum {
     // 五年级上册 (统编版官方完整目次)
     // ==============================================================
     // 第一单元
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '桂花雨'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '落花生'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '珍珠鸟'),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '桂花雨',
+      lessonId: 'g5a-guihuayu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '会认字\n箩 杭'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '会写字\n懂 兰 箩 婆 糕 饼 浸 缠 茶 捡'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '词语\n桂花 懂得 糕饼 茶叶 箩筐 外婆 浸泡 沉浸 缠绕 捡起 杭州 尤其 欣赏 姿态 香飘十里'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '落花生',
+      lessonId: 'g5a-luohuasheng-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '会认字\n亩 吩 咐 榨 矮 榴'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '会写字\n亩 播 浇 吩 咐 亭 慕 矮 榨 谈'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '词语\n播种 浇水 吩咐 榨油 爱慕 体面 开辟 居然 便宜 可贵 收获 茅亭 高矮'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '珍珠鸟',
+      lessonId: 'g5a-zhenzhuniao-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '会认字\n蔓 幽 悉 雏 柜 享 陪 待 趴 睑 眸'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第一单元',
       title: '语文园地一',
+      lessonId: 'g5a-diyidanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第一单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -4989,6 +4979,7 @@ class PrimaryChineseCurriculum {
 
     // 第二单元（阅读策略单元）
     PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '冀中的地道战',
+      lessonId: 'g5a-jizhongdedidaozhan-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会认字\n侵 略 垒 任 丘 搁 陷 拐 岔'),
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会写字\n侵 略 筑 堡 党 丘 妨 蔽 陷 拐'),
@@ -4999,6 +4990,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '将相和',
+      lessonId: 'g5a-jiangxianghe-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会认字\n璧 臣 强 诺 划 典 罪 廉 抵 御 辞 辱 擅 卿 削 袍'),
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会写字\n召 臣 议 缺 宫 献 诺 典 抄 罪 怯 拒 荆'),
@@ -5010,18 +5002,31 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '什么比猎豹的速度更快',
+      lessonId: 'g5a-shenmebiliebaodesudugengkuai-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会认字\n鸵 隼 瀚 啸'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会写字\n冠 俯 喷 枚 箭 浩 筒 束 赤 圈 置'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '词语\n猎豹 冠军 陆地 俯冲 搭乘 火箭 发动机 呼啸 手电筒 赤道 难以置信 鸵鸟 游隼 浩瀚 一束 放置 圆圈'),
+      ],
     ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第二单元',
       title: '“诺曼底号”遇难记',
+      lessonId: 'g5a-nuomandihaoyunanji-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会认字\n弥 脉 剖 裸 泣 汹 酣 械 卑 岗 宰 遣 嘶'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '会写字\n伦 腹 剖 窟 窿 混 维 秩 卑 岗 宰 措 遣 践'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '词语\n弥漫 山脉 剖开 半裸 汹涌 酣睡 机械 岗位 主宰 调遣 维持 秩序 卑微 措施 实践 窟窿 混乱 腹部 伦理'),
+      ],
     ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第二单元',
       title: '语文园地二',
+      lessonId: 'g5a-dierdanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第二单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5040,14 +5045,35 @@ class PrimaryChineseCurriculum {
     ),
 
     // 第三单元
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '猎人海力布'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '牛郎织女（一）'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '牛郎织女（二）'),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '猎人海力布',
+      lessonId: 'g5a-lierenhailibu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '会认字\n酬 誓 谎 牺 牲'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '会写字\n酬 珍 叮 嘱 塌 焦 誓 谎 延 悔 扶'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '词语\n猎物 酬谢 珍宝 感激 叮嘱 复活 议论 崩塌 搬家 焦急 发誓 谎话 迟延 镇定 后悔 悲痛 牺牲'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '牛郎织女（一）',
+      lessonId: 'g5a-niulangzhinvyi-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '会认字\n嫂 恳 筛 歹 罕 梭 婚 趟 泳 托 辈 瞌 酿'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '会写字\n郎 爹 嫂 辆 歹 罕 纱 妻 趟 托 狱 婚 辈 挨'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '词语\n嫂子 爹娘 剩饭 床铺 亲密 好歹 稀罕 妻子 晚霞 游泳 结婚 一辈子 车辆 纱衣 托付 监狱 挨近'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '牛郎织女（二）',
+      lessonId: 'g5a-niulangzhinver-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '会认字\n俭 皇 偎 衰 泰 珊 瑚 礁 筐 拗 惩 簪'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '词语\n节俭 依偎 衰老 泰山 珊瑚 礁石 竹筐 惩罚 玉簪 富丽堂皇 执拗 拗不过 怒气冲冲 好歹 察访 鹊桥 天河 男耕女织 日久天长 惊天动地'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第三单元',
       title: '语文园地三',
+      lessonId: 'g5a-disandanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第三单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5071,15 +5097,42 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第四单元',
       title: '古诗三首（示儿·题临安邸·己亥杂诗）',
+      lessonId: 'g5a-gushisanshou1shier-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '会认字\n邸 熏 亥 恃 喑 擞 龚'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '会写字\n祭 乃 熏 杭 亥 恃 哀 拘'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '词语\n家祭 乃翁 杭州 熏陶 己亥 恃风雷 悲哀 拘束'),
+      ],
     ),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '少年中国说'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '圆明园的毁灭'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '梅兰芳蓄须明志'),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '少年中国说',
+      lessonId: 'g5a-shaonianzhongguoshuojiexuan-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '会认字\n鳞 惶 哉 渊 隼 矞 硎'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '会写字\n泻 潜 试 胎 皇 履 疆'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '词语\n一泻汪洋 潜龙腾渊 鳞爪飞扬 鹰隼试翼 风尘翕张 奇花初胎 矞矞皇皇 干将发硎 有作其芒 天戴其苍 地履其黄 纵有千古 横有八荒 前途似海 来日方长 壮哉 震惶 边疆'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '圆明园的毁灭',
+      lessonId: 'g5a-yuanmingyuandehuimie-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '会认字\n珑 剔 澜 陵 宏 烬 奉 瑰 闯 统'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '会写字\n毁 估 损 拱 辉 煌 殿 陵 览 境 宏 唐 闯 销 奉'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '词语\n毁灭 不可估量 损失 殿堂 象征 仿照 建筑 漫游 饱览 境界 宏伟 瑰宝 销毁 罪证 奉命 统统'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '梅兰芳蓄须明志',
+      lessonId: 'g5a-meilanfangxuxumingzhi-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '会认字\n蓄 租 剃 纠 缠 邀 斩 妄 烫 扰'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '词语\n蓄须 租界 剃刀 纠缠 骚扰 拒绝 卖房度日 登台 妄想 滚烫 要挟 邀请'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第四单元',
       title: '语文园地四',
+      lessonId: 'g5a-disidanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第四单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5098,8 +5151,21 @@ class PrimaryChineseCurriculum {
     ),
 
     // 第五单元（习作单元）
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '太阳'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '金字塔'),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '太阳',
+      lessonId: 'g5a-taiyang-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '会认字\n摄 氏 殖 炭 疗 兽 蔬 较'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '会写字\n抵 氏 殖 粮 炭 区 杀 菌 疗'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '词语\n传说 摄氏度 繁殖 粮食 煤炭 地区 杀菌 治疗 漂浮 摄取 蔬菜 野兽 比较 密切 吸收 预防'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '金字塔',
+      lessonId: 'g5a-jinzita-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '会认字\n译 愧 熠 遐 刃 埃 滥 淤 湛 黏'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第五单元', title: '词语\n埃及 译名 不愧 遐想 刀刃 淤泥 泛滥 精湛 黏土 黏着物 熠熠发光 幽思 矗立 轮廓 陵墓 开凿 不可思议'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
@@ -5112,30 +5178,52 @@ class PrimaryChineseCurriculum {
           term: '上册',
           unit: '第五单元',
           title: '鲸（习作例文）',
+      lessonId: 'g5a-liwen1jing-dual',
         ),
         PrimaryChineseLesson(
           grade: 5,
           term: '上册',
           unit: '第五单元',
           title: '风向袋的制作（习作例文）',
+      lessonId: 'g5a-liwen2fengxiangdaidezhizuo-dual',
         ),
       ],
     ),
 
     // 第六单元
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '慈母情深'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '父爱之舟'),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '慈母情深',
+      lessonId: 'g5a-cimuqingshen-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '会认字\n魄 抑 颓 纫 噪 褐 惫 耽 兜 龟'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '会写字\n辞 抑 碌 吊 酷 暑 噪 脊 竟 龟 忍 酸 权 挣 茧'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '词语\n连续 广播 铁路 辞退 挣钱 压抑 潮湿 忙碌 阴暗 酷暑 炎夏 蒸笼 噪声 瘦弱 脊背 口罩 龟裂 忍心 数落 权利 衣兜 疲惫 耽误 褐色 颓败'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '父爱之舟',
+      lessonId: 'g5a-fuaizhizhou-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '会认字\n茧 栈 冤 枉 惚 跷 僻 迪 嫁 缴 榜 兼 嘲 枕'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '会写字\n蚕 考 疼 席 糖 屑 启 迪'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '词语\n渔船 报考 教训 心疼 席子 庙会 彩排 糖果 抽象 启迪 毕业 寄宿 师范 路费 轮换 领略 意境 磨灭 精致 蚕茧 纸屑 客栈 偏僻 嘲笑 枕头 缴费'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第六单元',
       title: '航天员写给孩子的信',
+      lessonId: 'g5a-hangtianyuanxiegeihaizidexin-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '会认字\n涟 漪 谅 铠 肋 赴 辰 姥 尚 凯 淖 憾'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '词语\n涟漪 原谅 铠甲 软肋 奔赴 星辰 姥姥 尚未 凯旋 泥淖 遗憾 牵挂 嘱托 使命 困境 自律 守时'),
+      ],
     ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第六单元',
       title: '语文园地六',
+      lessonId: 'g5a-diliudanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第六单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5159,14 +5247,35 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第七单元',
       title: '古诗词三首（山居秋暝·枫桥夜泊·早春呈水部张十八员外）',
+      lessonId: 'g5a-gushisanshou    1shanjuqiuming-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '会认字\n暝 浣 愈 酥'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '会写字\n孙 泊 愁 寺 畔'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '词语\n暝色 浣女 王孙 停泊 忧愁 寺庙 河畔 霜天 渔火 姑苏 天街 润如酥 绝胜 皇都'),
+      ],
     ),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '第一场雪'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '白鹭'),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '第一场雪',
+      lessonId: 'g5a-diyichangxue-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '会认字\n骤 凛 冽 彤 屑 谚 馒 吱'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '会写字\n侵 铅 妆 俗 虹 枕 瑞'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '词语\n骤然 凛冽 彤云 铅色 侵入 俗话 瑞雪 彩虹 枕头 雪屑 馒头 咯吱 簌簌 笼罩 覆盖 毛茸茸 沉甸甸'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '白鹭',
+      lessonId: 'g5a-bailu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '会认字\n鹭 嫌 喙 黛 嵌 匣 嗜 澄'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '会写字\n宜 鹤 嫌 朱 嵌 框 匣 哨 嗜 恩 韵'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '词语\n精巧 配合 身段 适宜 白鹤 生硬 寻常 忘却 镜匣 清澄 孤独 悠然 黄昏 恩惠 白鹭 色素 蓑毛 长喙 黛色 望哨 铿锵'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第七单元',
       title: '语文园地七',
+      lessonId: 'g5a-diqidanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第七单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5185,14 +5294,35 @@ class PrimaryChineseCurriculum {
     ),
 
     // 第八单元
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '古人谈读书'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '忆读书'),
-    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '走遍天下书为侣'),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '古人谈读书',
+      lessonId: 'g5a-gurentandushu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '会认字\n识 矣 岂 寝'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '会写字\n耻 诲 谓 诵 岂'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '词语\n羞耻 教诲 诵读 所谓 岂敢 默而识之 心到 眼到 口到'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '忆读书',
+      lessonId: 'g5a-yidushu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '会认字\n舅 宴 斩 凯 葛 鲁 寇 贾 呻 煞 某'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '会写字\n舅 津 斩 限 凯 葛 述 衰 刊 琐 朴 篇 某 贾'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '词语\n舅父 津津有味 英雄 无限 质朴 一知半解 述说 厌烦 荒唐 辛酸 访问 书刊 烦琐 真情实感 凯旋 诸葛亮 水浒传 荡寇志 呻吟 某年'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '走遍天下书为侣',
+      lessonId: 'g5a-zoubiantianxiashuweilv-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '会认字\n侣 娱 趟 诵 零 某 豫'),
+        PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '词语\n伴侣 娱乐 一趟 背诵 忽略 零分 编写 某种 回味 品味 思考 篇章'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 5,
       term: '上册',
       unit: '第八单元',
       title: '语文园地八',
+      lessonId: 'g5a-dibadanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 5, term: '上册', unit: '第八单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5288,6 +5418,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '草原',
+      lessonId: 'g6a-caoyuan-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第一单元', title: '会写字\n毯 玻 璃 裳 虹 蹄 腐 稍 微'),
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第一单元', title: '词语\n绿毯 线条 柔美 惊叹 回味 乐趣 目的地 洒脱 衣裳 彩虹 马蹄 热乎乎 奶豆腐 礼貌 拘束 举杯 感人 会心 微笑'),
@@ -5298,6 +5429,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '丁香结',
+      lessonId: 'g6a-dingxiangjie-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第一单元', title: '会写字\n缀 窥 幽 雅 案 拙 薄 糊 蕾 恰 襟 恍 怨'),
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第一单元', title: '词语\n宅院 幽雅 伏案 浑浊 笨拙 参差 眼帘 单薄 照耀 文思 梦想 迷蒙 妩媚 模糊 花苞 衣襟 恍然 愁怨 顺心 平淡'),
@@ -5308,6 +5440,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '古诗词三首（宿建德江·六月二十七日望湖楼醉书·西江月·夜行黄沙道中）',
+      lessonId: 'g6a-gushicisanshou1sujiandejiang-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第一单元', title: '会写字\n德 鹊 蝉'),
       ],
@@ -5317,6 +5450,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第一单元',
       title: '语文园地一',
+      lessonId: 'g6a-diyidanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第一单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5340,6 +5474,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '七律·长征',
+      lessonId: 'g6a-qilvchangzheng-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '会写字\n律 崖 渡 索'),
       ],
@@ -5349,6 +5484,7 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '狼牙山五壮士',
+      lessonId: 'g6a-langyashanwuzhuangshi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '会写字\n寇 副 榴 弹 抡 贯 棋 悬 沸 涧 雹 屹 悦 迈 屈'),
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '词语\n日寇 奋战 险要 手榴弹 全神贯注 悬崖 斩钉截铁 热血沸腾 攀登 居高临下 山涧 粉身碎骨 雹子 屹立 眺望 喜悦 壮烈 豪迈 不屈 惊天动地'),
@@ -5359,17 +5495,25 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '开国大典',
+      lessonId: 'g6a-kaiguodadian-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '会写字\n政 府 宾 盏 栏 汇 爆 宣 阅 制 坦 距 隆 射'),
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '词语\n协商 汇集 预定 爆发 排山倒海 宣布 就位 宣告 雄伟 肃静 旗帜 语调 完毕 检阅 制服 坦克 一致 距离 高潮 次序'),
       ],
     ),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '我的战友邱少云'),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '我的战友邱少云',
+      lessonId: 'g6a-wodezhanyouqiushaoyun-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '会认字\n坳 蜷 蔓 伪 摧 蔽 趴 搜 幕 液 缩 熄 呻'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '词语\n山坳 潜伏 隐蔽 伪装 趴下 搜索 蔓延 蜷缩 熄灭 呻吟 摧毁 火力警戒 烈火 千斤巨石'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第二单元',
       title: '语文园地二',
+      lessonId: 'g6a-dierdanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第二单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5388,14 +5532,35 @@ class PrimaryChineseCurriculum {
     ),
 
     // 第三单元（阅读策略单元）
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '竹节人'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '宇宙生命之谜'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '故宫博物院'),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '竹节人',
+      lessonId: 'g6a-zhujieren-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '会认字\n颓 疙 瘩 棍 俨 鏖 咤 蟠 窦 敦 叉 靡 拙'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '会写字\n豁 凛 疙 瘩 棍 橡 雕 跺 颓 沮 丧 趴 屉 疲 倦 裁'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '词语\n豁开 疙瘩 冰棍 橡皮 雕刻 疲倦 抽屉 跺脚 颓然 沮丧 趴下 鏖战 风靡 俨然 叉腿'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '宇宙生命之谜',
+      lessonId: 'g6a-yuzhoushengmingzhimi-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '会认字\n嫦 娥 轨 辐 壤 陨 粟 薄'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '会写字\n谜 尚 氧 倾 揭 斑 燥 漠 磁 抵 御 素 盗 培'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '词语\n发达 理论 类似 猜测 起源 适当 氧气 提供 能源 昼夜 神秘 观测 拍摄 斑点 枯萎 干燥 沙漠 磁场 抵御 因素 考察 培养 轨道 辐射 土壤 陨石'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '故宫博物院',
+      lessonId: 'g6a-gugongbowuyuan-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '会认字\n矗 鳌 湛 琉 蟠 轴 銮 磬 檀 乾 坤 穆 枋 藻 矫 嫔 迥 攒'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '词语\n矗立 鳌头 湛蓝 琉璃 蟠龙 中轴线 金銮殿 击磬 檀香 额枋 藻井 矫健 妃嫔 肃穆 攒聚 雕镂 斗拱 玉玺 水榭'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第三单元',
       title: '语文园地三',
+      lessonId: 'g6a-disandanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第三单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5414,14 +5579,35 @@ class PrimaryChineseCurriculum {
     ),
 
     // 第四单元
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '桥'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '穷人'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '金色的鱼钩'),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '桥',
+      lessonId: 'g6a-qiao-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '会认字\n咆 哮 狞 淌 呻 奠'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '会写字\n咆 哮 疯 狞 淌 哑 呻 奠'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '词语\n山洪 咆哮 狂奔 狞笑 拥戴 沙哑 呻吟 搀扶 祭奠 洪水 惊慌 放肆 吞没 塌败'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '穷人',
+      lessonId: 'g6a-qiongren-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '会认字\n搁 魁 寡 蜷 忐 忑 黧 熬'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '会写字\n汹 涌 澎 湃 熄 掀 唉 淋 糟 嘛 皱 勺'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '词语\n渔夫 风暴 轰鸣 汹涌澎湃 沉思 抱怨 倾听 探望 照顾 阴冷 湿淋淋 渔网 糟糕 忧虑 搁板 魁梧 寡妇 蜷缩 黧黑'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '金色的鱼钩',
+      lessonId: 'g6a-jinsedeyugou-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '会认字\n颧 鬓 稞 搪 胁 敛 疙 瘩 搀 噎 奄 瞻 锈 炊'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '词语\n颧骨 两鬓 青稞 搪瓷 衰弱 宿营地 鱼饵 收敛 疙瘩 搀扶 抽噎 瞻仰 生锈 熬粥 保姆'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第四单元',
       title: '语文园地四',
+      lessonId: 'g6a-disidanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第四单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5440,8 +5626,21 @@ class PrimaryChineseCurriculum {
     ),
 
     // 第五单元（习作单元）
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '灯光'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '盼'),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '灯光',
+      lessonId: 'g6a-dengguang-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '会认字\n歼 钮 憧 憬 璀 璨 郝 魆 钧 皖'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '词语\n漫步 照耀 宏伟 围歼 电钮 倚靠 微弱 暴露 牺牲 憧憬 璀璨 黑魆魆 豫皖苏平原'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '盼',
+      lessonId: 'g6a-pan-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '会认字\n袖 筒 篷 缩 疯 瓦 柜 喧 甩 嚷 酱 唇 蹦 梯 瞟 囔 痱 窸 窣'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '会写字\n袖 篷 缩 疯 瓦 柜 喧 甩 嚷 酱 唇 蹦 梯'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第五单元', title: '词语\n斗篷 袖筒 瓦蓝 衣柜 预报 喧闹 遮盖 逗引 酱油 嘴唇 楼梯 嘟囔 痱子 瞟一眼 玛瑙'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
@@ -5454,12 +5653,14 @@ class PrimaryChineseCurriculum {
           term: '上册',
           unit: '第五单元',
           title: '爸爸的计划（习作例文）',
+      lessonId: 'g6a-liwenbabadejihua-dual',
         ),
         PrimaryChineseLesson(
           grade: 6,
           term: '上册',
           unit: '第五单元',
           title: '小站（习作例文）',
+      lessonId: 'g6a-liwenxiaozhan-dual',
         ),
       ],
     ),
@@ -5470,15 +5671,41 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第六单元',
       title: '古诗三首（浪淘沙·江南春·书湖阴先生壁）',
+      lessonId: 'g6a-gushisanshou1langtaoshaqiyi-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '会认字\n涯 簸 迢 郭 苔 畦 闼'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '会写字\n涯 簸 苔 畦 闼 绕'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '词语\n天涯 颠簸 城郭 青苔 菜畦 排闼 环绕 银河 酒旗 花木'),
+      ],
     ),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '只有一个地球'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '青山不老'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '三黑和土地'),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '只有一个地球',
+      lessonId: 'g6a-zhiyouyigediqiu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '会认字\n莹 裹 篮 蔼 资 矿 赐 慷 慨 滥 睹'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '会写字\n莹 裹 篮 蔼 资 矿 赐 慷 慨 滥 睹'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '词语\n晶莹 摇篮 壮观 和蔼 资源 矿产 恩赐 慷慨 枯竭 贡献 毁坏 滥用 威胁 目睹 包裹 渺小 破碎'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '青山不老',
+      lessonId: 'g6a-qingshanbulao-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '会认字\n粼 虐 踞 淤 擎 锹 劲 拄 载'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '词语\n肆虐 盘踞 绿洲 劲挺 淤泥 荡漾 记载 铁锹 拐杖 归宿 领悟 波光粼粼'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '三黑和土地',
+      lessonId: 'g6a-sanheihetudi-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '会认字\n荞 耙 蹚 闺 蝈 茬'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '词语\n土疙瘩 顺溜 松散 麦籽 荞麦 耙地 蹚坏 闺女 麦茬 白霎霎 痒抓抓 蝈蝈儿 翻身'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第六单元',
       title: '语文园地六',
+      lessonId: 'g6a-diliudanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第六单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5502,19 +5729,38 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第七单元',
       title: '文言文二则（两小儿辩日·曹冲称象）',
+      lessonId: 'g6a-wenyanwenerze1liangxiaoerbianri-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '会认字\n辩 盂 沧 汤 孰 汝 知 岐 致'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '会写字\n辩 仓 聪 置 施'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '词语\n辩斗 盘盂 沧沧凉凉 探汤 孰为汝多知乎 聪慧 巨象 水痕 施行 置象'),
+      ],
     ),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '表里的生物'),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '表里的生物',
+      lessonId: 'g6a-biaolideshengwu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '会认字\n蝎 钵 蝈 蜇 恶 蟋 蟀'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '会写字\n脆 拦 玻 璃 恶 怖 蟋 蟀'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '词语\n机器 钟楼 街心 坚硬 玻璃 齿轮 单调 清脆 唯恐 丑恶 恐怖 证实 蝎子 钵子 蝈蝈 蜇人'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第七单元',
       title: '他们那时候多有趣啊',
+      lessonId: 'g6a-tamennashihouduoyouqua-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '会认字\n鄙 屑 憎 恶 玛 荧 屏 调'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '词语\n玛琪 托米 测验 装置 屏幕 调整 高傲 憎恶 荧光屏'),
+      ],
     ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第七单元',
       title: '语文园地七',
+      lessonId: 'g6a-diqidanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第七单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5533,20 +5779,47 @@ class PrimaryChineseCurriculum {
     ),
 
     // 第八单元
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '少年闰土'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '好的故事'),
-    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '我的伯父鲁迅先生'),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '少年闰土',
+      lessonId: 'g6a-shaonianruntu-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '会认字\n猹 弶 匾 秕 鸪 獾 毡 缚 猬 伶 俐 窜 汛'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '会写字\n郑 拜 租 厨 毡 羞 撒 缚 猬 伶 俐 窜'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '词语\n家景 郑重 祭祀 供品 讲究 厨房 毡帽 银项圈 怕羞 竹匾 秕谷 鹁鸪 獾猪 刺猬 束缚 伶俐 潮汛 沙土地'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '好的故事',
+      lessonId: 'g6a-haodegushi-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '会认字\n搁 萍 藻 漾 瞬 凝 骤 掷'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '会写字\n搁 萍 藻 漾 瞬 凝 掷 陡'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '词语\n昏沉 搁置 萍藻 荡漾 瞬间 凝视 陡然 投掷 云锦 斑驳 闪烁 碎影 黑影'),
+      ],
+    ),
+    PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '我的伯父鲁迅先生',
+      lessonId: 'g6a-wodebofuluxunxiansheng-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '会认字\n殡 悼 唁 囫 囵 瀚 镊 硼 敷 佣 逝'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '词语\n殡仪馆 追悼 吊唁 团聚 爱抚 失声痛哭 囫囵吞枣 张冠李戴 饱经风霜 镊子 硼酸水 敷药 女佣 深奥 咳嗽 枯瘦'),
+      ],
+    ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第八单元',
       title: '有的人——纪念鲁迅有感',
+      lessonId: 'g6a-youderen—jinianluxunyougan-dual',
+      subLessons: [
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '会认字\n朽 摔 垮 俯 铭 臧'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '会写字\n朽 摔 垮 俯'),
+        PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '词语\n活着 不朽 摔垮 俯身 抬举 情愿 下场 名字 尸首'),
+      ],
     ),
     PrimaryChineseLesson(
       grade: 6,
       term: '上册',
       unit: '第八单元',
       title: '语文园地八',
+      lessonId: 'g6a-dibadanyuanyuwenyuandi-dual',
       subLessons: [
         PrimaryChineseLesson(grade: 6, term: '上册', unit: '第八单元', title: '交流平台'),
         PrimaryChineseLesson(
@@ -5669,6 +5942,28 @@ class PrimaryChineseCurriculum {
       term: '上册',
       unit: '第二单元',
       title: '《世说新语》二则（咏雪·陈太丘与友期行）',
+      // 2026-10-20 初中样板课：文言实词作为「词语」子栏目
+      // （沿用小学的字词表展开交互；逐词释义见 docs/design/7-9年级学段落地清单）
+      subLessons: [
+        PrimaryChineseLesson(
+          grade: 7,
+          term: '上册',
+          unit: '第二单元',
+          title: '词语\n'
+              '期 约定（期行·期日中）\n'
+              '舍 舍弃、丢下（太丘舍去）\n'
+              '至 到（过中不至）\n'
+              '顾 回头看（元方入门不顾）\n'
+              '引 拉、牵拉（下车引之）\n'
+              '信 讲信用（则是无信）\n'
+              '委 丢下、舍弃（相委而去）\n'
+              '君 对对方的尊称（君与家君）\n'
+              '家君 对人称自己的父亲\n'
+              '尊君 对别人父亲的尊称\n'
+              '不 通「否」，表疑问（尊君在不）\n'
+              '惭 感到惭愧（友人惭）',
+        ),
+      ],
     ),
     PrimaryChineseLesson(
       grade: 7,
@@ -6434,17 +6729,6 @@ class PrimaryChineseCurriculum {
       unit: '第六单元',
       title: '诗词五首（十五从军征·白雪歌送武判官归京·南乡子登京口北固亭有怀·过零丁洋·山坡羊潼关怀古）',
     ),
-    // ==============================================================
-    // 三年级上册 (统编版)
-    // ==============================================================
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第三单元', title: '会认字\n轴 基 础 阁 厘 帕 祥'),
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第三单元', title: '词语\n培植 妥当 恒星 厘米 车轴 恒心 阁楼 萌发'),
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第四单元', title: '会认字\n申 介 绍 宗 祖 旨 乏 式'),
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第四单元', title: '词语\n主旨 申请 发力 介绍 占领'),
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第六单元', title: '会认字\n蝌 蚪 蛤 蟆 螃 蟹 鲤 鲫 鲨'),
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第七单元', title: '词语\n田螺 螃蟹 鲤鱼 鲫鱼 鲨鱼'),
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第八单元', title: '会认字\n睁 眨 瞪 瞅 眶 怒 呆 睹'),
-    PrimaryChineseLesson(grade: 3, term: '上册', unit: '第八单元', title: '词语\n怒目圆睁 眨眼 眼眶 目瞪口呆 耳闻目睹'),
   ];
 
   /// Filter lessons by grade (1..6) and term ('上册' | '下册').

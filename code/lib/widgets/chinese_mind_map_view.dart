@@ -47,6 +47,77 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
   Matrix4? _favoritedMatrix;
   final GlobalKey _firstUnitKey = GlobalKey();
 
+  /// 展开的课文节点集合（未展开的生字词语四级子节点默认收起）
+  final Set<String> _expandedLessonKeys = {};
+
+  /// 2026-10-20 郭老师：字词类子节点（会认字 / 会写字 / 词语）的展开集合。
+  /// 这些子节点**默认收起**——不铺开字表；点一下才把字词显示出来。
+  final Set<String> _expandedWordNodes = {};
+
+  /// 2026-10-20：课文节点按 key 存 GlobalKey，展开时用它把画布平移过去。
+  /// 为什么需要：子节点串在课文节点**右侧**（课文 → 16px 连接线 → 子节点），
+  /// 展开后整条链变长，在 50% 缩放下子节点会被推出屏幕右缘，用户看不见。
+  final Map<String, GlobalKey> _lessonNodeKeys = {};
+
+  /// 把画布平移到指定节点（target 置于视口中心，可带横向偏移）。
+  void _panToKey(GlobalKey? key, {double dxOffset = 0}) {
+    if (!mounted || key == null) return;
+    final targetContext = key.currentContext;
+    final contentContext = _contentKey.currentContext;
+    final viewerContext = context;
+    if (targetContext == null || contentContext == null) return;
+    final targetBox = targetContext.findRenderObject() as RenderBox?;
+    final contentBox = contentContext.findRenderObject() as RenderBox?;
+    final viewerBox = viewerContext.findRenderObject() as RenderBox?;
+    if (targetBox == null || contentBox == null || viewerBox == null) return;
+    if (!targetBox.hasSize || !contentBox.hasSize || !viewerBox.hasSize) return;
+
+    final targetOffsetInContent =
+        targetBox.localToGlobal(Offset.zero, ancestor: contentBox);
+    final targetCenterX = targetOffsetInContent.dx + targetBox.size.width / 2;
+    final targetCenterY = targetOffsetInContent.dy + targetBox.size.height / 2;
+
+    final viewerSize = viewerBox.size;
+    final scale = _currentScale > 0 ? _currentScale : 1.0;
+    final tx = viewerSize.width / 2 - targetCenterX * scale + dxOffset;
+    final ty = viewerSize.height / 2 - targetCenterY * scale;
+
+    final m = Matrix4.identity()
+      ..setTranslationRaw(tx, ty, 0.0)
+      ..scale(scale, scale, 1.0);
+    _animateToMatrix(m);
+  }
+
+  String _lessonKey(PrimaryChineseLesson l) =>
+      '${l.grade}_${l.term}_${l.unit}_${l.title}';
+
+  bool _isLessonExpanded(PrimaryChineseLesson lesson) {
+    if (widget.searchQuery.trim().isNotEmpty) {
+      for (final sub in lesson.subLessons) {
+        if (_isLessonMatched(sub)) return true;
+      }
+    }
+    return _expandedLessonKeys.contains(_lessonKey(lesson));
+  }
+
+  void _toggleLessonExpanded(PrimaryChineseLesson lesson) {
+    final key = _lessonKey(lesson);
+    setState(() {
+      if (_expandedLessonKeys.contains(key)) {
+        _expandedLessonKeys.remove(key);
+      } else {
+        _expandedLessonKeys.add(key);
+      }
+    });
+    // 2026-10-20：展开后自动把画布平移过去，否则右侧四级子节点被推出屏幕右缘。
+    // 偏移量按子节点宽度（连接线 16 + 子节点约 196）折算，50% 缩放下约 106 逻辑像素。
+    if (_expandedLessonKeys.contains(key)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _panToKey(_lessonNodeKeys[key], dxOffset: 106);
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -306,9 +377,14 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
     // 重置首个匹配节点的 key 捕获器
     _hasCalculatedFirstMatch = false;
 
-    // 按单元将课文分组
+    // 按单元将课文分组（铁律：三级节点仅限课文与语文园地，生字词语严禁作为三级节点独立平铺展示）
     final Map<String, List<PrimaryChineseLesson>> unitMap = {};
     for (final l in lessons) {
+      if (l.title.startsWith('会认字') ||
+          l.title.startsWith('会写字') ||
+          l.title.startsWith('词语')) {
+        continue;
+      }
       unitMap.putIfAbsent(l.unit, () => []).add(l);
     }
 
@@ -724,6 +800,7 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
   }) {
     final isMatched = _isLessonMatched(lesson);
     final hasSub = lesson.subLessons.isNotEmpty;
+    final isExpanded = hasSub && _isLessonExpanded(lesson);
 
     return IntrinsicHeight(
       child: Row(
@@ -745,17 +822,23 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: _buildLessonNode(ll, lesson, lessonIndex: lessonIndex),
+              child: _buildLessonNode(
+                ll,
+                lesson,
+                lessonIndex: lessonIndex,
+                isExpanded: isExpanded,
+                onToggleExpand: hasSub ? () => _toggleLessonExpanded(lesson) : null,
+              ),
             ),
           ),
-          if (hasSub) ...[
+          if (isExpanded) ...[
             // 连入四级分支的水平连接横线
             Container(
               width: 16,
               height: 1.5,
               color: ll.divider.withValues(alpha: 0.9),
             ),
-            // 四级分支列表（垂直排开，如识字加油站、字词句运用、日积月累、我爱阅读）
+            // 四级分支列表（垂直排开，如识字加油站、字词句运用、日积月累、我爱阅读、生字词）
             Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -827,6 +910,10 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
     final hasLabel = titleLines.length > 1;
     final label = hasLabel ? titleLines.first : null;
     final body = hasLabel ? titleLines.sublist(1).join('\n') : rawTitle;
+    // 字词类子节点（会认字/会写字/词语）：默认收起，点一下才铺开字表。
+    final wordKey =
+        '${subLesson.grade}_${subLesson.term}_${subLesson.unit}_${subLesson.title}';
+    final wordExpanded = hasLabel && _expandedWordNodes.contains(wordKey);
 
     Key? nodeKey;
     if (isMatched && !_hasCalculatedFirstMatch) {
@@ -861,7 +948,16 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
 
     return InkWell(
       key: nodeKey,
-      onTap: subLesson.isPlayable ? () => widget.onLessonTap(subLesson) : null,
+      onTap: hasLabel
+          // 字词类：点一下展开/收起字表（这类子节点没有课包，本来也点不进去）
+          ? () => setState(() {
+                if (wordExpanded) {
+                  _expandedWordNodes.remove(wordKey);
+                } else {
+                  _expandedWordNodes.add(wordKey);
+                }
+              })
+          : (subLesson.isPlayable ? () => widget.onLessonTap(subLesson) : null),
       borderRadius: BorderRadius.circular(8),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
@@ -901,15 +997,32 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
             const SizedBox(width: 5),
             Flexible(
               child: Text(
-                hasLabel ? '$label：$body' : body,
+                hasLabel
+                    // 默认只显示栏目名；展开后才把字词铺开
+                    ? (wordExpanded ? '$label：$body' : (label ?? rawTitle))
+                    : body,
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: isMatched ? FontWeight.w700 : FontWeight.w500,
-                  color: isMatched ? Colors.black87 : ll.textPrimary,
+                  color: isMatched
+                      ? (ll.brightness == Brightness.dark
+                          ? Colors.amber.shade200
+                          : Colors.brown.shade900)
+                      : ll.textPrimary,
                   height: 1.3,
                 ),
               ),
             ),
+            if (hasLabel) ...[
+              const SizedBox(width: 4),
+              Icon(
+                wordExpanded
+                    ? Icons.unfold_less_rounded
+                    : Icons.unfold_more_rounded,
+                size: 13,
+                color: ll.textSecondary,
+              ),
+            ],
           ],
         ),
       ),
@@ -921,6 +1034,8 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
     LLPalette ll,
     PrimaryChineseLesson lesson, {
     required int lessonIndex,
+    bool isExpanded = false,
+    VoidCallback? onToggleExpand,
   }) {
     final numberedTitle = lesson.numberedTitle(fallbackIndex: lessonIndex);
     final isMatched = _isLessonMatched(lesson);
@@ -930,6 +1045,9 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
       _firstMatchedKey = GlobalKey();
       nodeKey = _firstMatchedKey;
       _hasCalculatedFirstMatch = true;
+    } else {
+      // 2026-10-20：给每个课文节点留一个稳定 key，展开时用它平移画布
+      nodeKey = _lessonNodeKeys.putIfAbsent(_lessonKey(lesson), GlobalKey.new);
     }
 
     // 搜索命中样式：明亮琥珀色高亮边框与柔和微光背景
@@ -966,9 +1084,9 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
       borderRadius: BorderRadius.circular(10),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
-        width: 184,
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        width: 196,
+        constraints: const BoxConstraints(minHeight: 42),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: BorderRadius.circular(10),
@@ -998,19 +1116,58 @@ class _ChineseMindMapViewState extends State<ChineseMindMapView>
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: isMatched ? FontWeight.w700 : FontWeight.w500,
-                  color: isMatched ? Colors.black87 : ll.textPrimary,
-                  height: 1.2,
+                  color: isMatched
+                      ? (ll.brightness == Brightness.dark
+                          ? Colors.amber.shade200
+                          : Colors.brown.shade900)
+                      : ll.textPrimary,
+                  height: 1.25,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
               ),
             ),
-            if (lesson.subLessons.isNotEmpty)
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 16,
-                color: ll.textTertiary,
+            if (lesson.subLessons.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: onToggleExpand,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2.5),
+                  decoration: BoxDecoration(
+                    color: isExpanded
+                        ? ll.accent.withValues(alpha: 0.16)
+                        : ll.divider.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isExpanded ? ll.accent.withValues(alpha: 0.4) : Colors.transparent,
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${lesson.subLessons.length}',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          color: isExpanded ? ll.accent : ll.textSecondary,
+                          height: 1.0,
+                        ),
+                      ),
+                      const SizedBox(width: 1),
+                      Icon(
+                        isExpanded
+                            ? Icons.unfold_less_rounded
+                            : Icons.unfold_more_rounded,
+                        size: 13,
+                        color: isExpanded ? ll.accent : ll.textSecondary,
+                      ),
+                    ],
+                  ),
+                ),
               ),
+            ],
           ],
         ),
       ),

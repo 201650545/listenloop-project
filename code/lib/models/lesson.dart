@@ -16,6 +16,7 @@ class Lesson {
     required this.importedAt,
     this.coverPath,
     this.video,
+    this.series,
   });
 
   /// Stable package identifier (`manifest.lessonId`).
@@ -42,6 +43,9 @@ class Lesson {
   /// Optional online video source (Phase 3A). Null for audio-only lessons.
   final VideoSource? video;
 
+  /// 可选课程系列名（2026-09-29 课文朗读系列）：课程列表按此归组展示。
+  final String? series;
+
   /// When the lesson was imported (local time).
   final DateTime importedAt;
 
@@ -58,6 +62,7 @@ class Lesson {
     importedAt: importedAt,
     coverPath: coverPath ?? this.coverPath,
     video: video,
+    series: series,
   );
 }
 

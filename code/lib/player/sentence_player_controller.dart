@@ -52,8 +52,8 @@ class SentencePlayerController extends ChangeNotifier {
     this.initialRepeatTarget = 1,
   }) : assert(sentences.isNotEmpty, 'sentences must not be empty'),
        assert(
-         initialSentenceIndex >= 0 && initialSentenceIndex < sentences.length,
-         'initialSentenceIndex out of range',
+         initialSentenceIndex >= 0,
+         'initialSentenceIndex must be >= 0',
        ),
        assert(
          initialMode == PlaybackMode.audio || videoFacade != null,
@@ -65,7 +65,8 @@ class SentencePlayerController extends ChangeNotifier {
        _mode = initialMode,
        _sentences = List<Sentence>.unmodifiable(sentences),
        _assetPath = audioAsset,
-       _currentIndex = initialSentenceIndex,
+       _currentIndex =
+           initialSentenceIndex.clamp(0, sentences.length - 1).toInt(),
        _playbackRate = initialPlaybackRate.clamp(0.5, 2.0).toDouble(),
        _repeatTarget = initialRepeatTarget < 0 ? 0 : initialRepeatTarget;
 
@@ -93,12 +94,12 @@ class SentencePlayerController extends ChangeNotifier {
   /// True while a source switch is in flight (a video load can take
   /// seconds); user playback commands are absorbed meanwhile.
   bool _isSwitchingSource = false;
-  final List<Sentence> _sentences;
-  final String _assetPath;
+  List<Sentence> _sentences;
+  String _assetPath;
 
   /// When true, [_assetPath] is an absolute file path on disk (imported
   /// lesson media); otherwise it is a bundled asset path.
-  final bool audioIsFile;
+  bool audioIsFile;
 
   /// Sentence to open (V0.2.1 恢复学习).
   final int initialSentenceIndex;
@@ -130,6 +131,10 @@ class SentencePlayerController extends ChangeNotifier {
   /// user-initiated play / sentence switch.
   int _repeatRemaining = 0;
 
+  /// When true, the lesson loops back to sentence 0 after the last sentence
+  /// finishes, instead of auto-advancing to the next lesson.
+  bool _lessonLoop = false;
+
   /// Bumped on every user-intended playback action (play / pause / switch /
   /// dispose). Async loop-restarts capture it and abort when it changed, so
   /// a stale completion can never restart the wrong sentence (V0.2 §11).
@@ -140,6 +145,10 @@ class SentencePlayerController extends ChangeNotifier {
   /// stale past-end samples must not trigger extra completions (they would
   /// burn repeat counts faster than the audible playback).
   bool _restartPending = false;
+
+  /// Target millisecond of an in-flight seek. Used to ignore stale position samples
+  /// emitted by the platform engine before the seek settles, preventing cascading auto-advances.
+  int? _pendingSeekTargetMs;
 
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<PlaybackCompletionEvent>? _completionSub;
@@ -242,6 +251,20 @@ class SentencePlayerController extends ChangeNotifier {
 
   bool get canGoPrevious => _currentIndex > 0;
 
+  /// 公开可设置的回调。非 null 时，每句播完停在句末并回调，不再自动跳下一句。
+  /// 由跟读会话开启时设置、退出时清 null（清 null 即恢复原行为）。
+  ///
+  /// WP-H 跟读验收（方案 §五）：「读完一句自动停下等孩子读」这个行为原本
+  /// 不存在——本句读完不是循环本句就是自动跳下一句。这道门是 WP-B 名下
+  /// 唯一需要的改动：只停住 + 回调，时间戳/高亮/定位一律不动。
+  Future<void> Function(int finishedSentenceIndex)? readAlongGate;
+
+  /// 当在首句触发「上一句」时，若外部注册了切课回调，则切换至「上一课」
+  VoidCallback? onPreviousLessonRequested;
+
+  /// 当在末句触发「下一句」或整篇课文自然播完最后一句时，若外部注册了切课回调，则自动切换至「下一课」
+  VoidCallback? onNextLessonRequested;
+
   /// 本会话是否采用逐句 clip 播放列表。
   ///
   /// 2026-09-22 用户裁定（樱花草反馈"能不能像正常听歌一样"）：音频课程
@@ -259,6 +282,10 @@ class SentencePlayerController extends ChangeNotifier {
   /// play N times per sentence.
   int get repeatTarget => _repeatTarget;
 
+  /// When true, the whole lesson loops back to sentence 0 after the last
+  /// sentence finishes (no auto-advance to the next lesson).
+  bool get lessonLoop => _lessonLoop;
+
   /// Sets how many times each sentence repeats: 0 = infinite, N = N times.
   /// Applies to the running sentence immediately (the play in progress counts
   /// as repetition #1) — verified necessary on device 2026-09-16: without
@@ -272,6 +299,75 @@ class SentencePlayerController extends ChangeNotifier {
       await _facade.setLoopOne(target == 0 || _repeatRemaining > 1);
     }
     notifyListeners();
+  }
+
+  /// Toggles whole-lesson looping. When enabled, playback wraps back to
+  /// sentence 0 after the last sentence completes instead of stopping or
+  /// auto-advancing to the next lesson.
+  void setLessonLoop(bool enabled) {
+    _lessonLoop = enabled;
+    notifyListeners();
+  }
+
+  /// 句间循环间隔（v0.9.1 课堂需求 2026-09-29）：两次播放之间静默等待的
+  /// 时长。课堂带读场景（如二年级课文）：老师控制节奏，句与句之间留 1-10
+  /// 秒给学生跟读。0 = 无间隔（默认，行为与旧版完全一致）。
+  ///
+  /// 生效点：[_finishCurrentSentence] 的循环重启与自动跳下一句——两个「句
+  /// 尾」决策点在继续播放前先等待 [sentenceGap] 毫秒。等待期间可以被任何
+  /// 用户操作（暂停/切句/dispose）打断（generation 校验）。
+  int _sentenceGapMs = 0;
+
+  /// 当前句间循环间隔（毫秒）。
+  int get sentenceGapMs => _sentenceGapMs;
+
+  /// 设置句间循环间隔（毫秒，0/1000/3000/5000 等）。
+  Future<void> setSentenceGap(int ms) async {
+    if (_disposed || ms < 0 || ms == _sentenceGapMs) return;
+    _sentenceGapMs = ms;
+    notifyListeners();
+  }
+
+  /// 别名：支持 setSentenceGapMs
+  Future<void> setSentenceGapMs(int ms) => setSentenceGap(ms);
+
+  /// 是否处于句间等待（UI 可显示「等待中」提示）。
+  bool get waitingInGap => _gapTimer != null;
+
+  /// 句间等待激活中：等待期间 position 流推送的值无意义——底层 pause()
+  /// 是 fire-and-forget（视频源音频会继续流过句间停顿），若不整体忽略，
+  /// 「自然过渡」分支会在等待期间把下标悄悄 +1，gap 计时器触发后回调
+  /// 又 +1，用户看到的就是「停顿 3 秒后直接跳到第三句」（v0.9.2 实机
+  /// 反馈 2026-09-29）。等待结束（触发/打断/换句）一律置回 false。
+  bool _gapWaitActive = false;
+
+  Timer? _gapTimer;
+
+  /// 句间等待：等 [ms] 毫秒后执行 [then]。generation 校验保证用户中途
+  /// 暂停/切句/dispose 时不会恢复播放。立即返回 false 表示被打断。
+  Future<bool> _waitForGap(int ms, int gen, VoidCallback then) async {
+    if (ms <= 0) {
+      then();
+      return true;
+    }
+    final completer = Completer<bool>();
+    _gapTimer = Timer(Duration(milliseconds: ms), () {
+      _gapTimer = null;
+      _gapWaitActive = false; // 无论触发还是被 generation 作废，等待都结束了
+      if (_disposed || gen != _generation) {
+        completer.complete(false);
+        return;
+      }
+      then();
+      completer.complete(true);
+    });
+    return completer.future;
+  }
+
+  void _cancelGapTimer() {
+    _gapTimer?.cancel();
+    _gapTimer = null;
+    _gapWaitActive = false;
   }
 
   /// Sets the playback rate and rescales the auxiliary watchdog so a slowed
@@ -519,6 +615,7 @@ class SentencePlayerController extends ChangeNotifier {
     final gen = _generation;
     _repeatRemaining = _repeatTarget == 0 ? -1 : _repeatTarget;
     _watchdog?.cancel();
+    _cancelGapTimer(); // 播放键作废进行中的句间等待
     _restartPending = false;
     try {
       final start = Duration(milliseconds: sentence.startMs);
@@ -539,9 +636,11 @@ class SentencePlayerController extends ChangeNotifier {
 
       if (_useClipPlaylist) {
         await _facade.setLoopOne(_repeatTarget == 0);
+        _pendingSeekTargetMs = sentence.startMs;
         await _facade.seekSentence(_currentIndex, start);
         if (_disposed || gen != _generation) return;
       } else {
+        _pendingSeekTargetMs = sentence.startMs;
         await _facade.seek(start);
         if (_disposed || gen != _generation) return;
       }
@@ -571,14 +670,17 @@ class SentencePlayerController extends ChangeNotifier {
     final gen = _generation;
     _repeatRemaining = _repeatTarget == 0 ? -1 : _repeatTarget;
     _restartPending = false;
+    _cancelGapTimer(); // 重播作废进行中的句间等待
     _watchdog?.cancel();
     try {
       final start = Duration(milliseconds: currentSentence.startMs);
       if (_useClipPlaylist) {
         await _facade.setLoopOne(_repeatTarget == 0);
+        _pendingSeekTargetMs = currentSentence.startMs;
         await _facade.seekSentence(_currentIndex, start);
         if (_disposed || gen != _generation) return;
       } else {
+        _pendingSeekTargetMs = currentSentence.startMs;
         await _facade.seek(start);
         if (_disposed || gen != _generation) return;
       }
@@ -600,6 +702,7 @@ class SentencePlayerController extends ChangeNotifier {
     if (!_isInitialized || _disposed || _isSwitchingSource) return;
     _generation++;
     _watchdog?.cancel();
+    _cancelGapTimer(); // 句间等待也可被暂停打断
     try {
       _isPlaying = false;
       await _facade.pause();
@@ -609,15 +712,25 @@ class SentencePlayerController extends ChangeNotifier {
     }
   }
 
-  /// Advances to the next sentence. No-op (and [canGoNext] is false) on the
-  /// last sentence — it never wraps around to the first.
-  Future<void> nextSentence() =>
-      _transitionToSentence(_currentIndex + 1, play: false, reason: 'next');
+  /// Advances to the next sentence. If already on the last sentence and
+  /// [onNextLessonRequested] is provided, triggers navigation to next lesson.
+  Future<void> nextSentence() async {
+    if (!canGoNext) {
+      onNextLessonRequested?.call();
+      return;
+    }
+    await _transitionToSentence(_currentIndex + 1, play: false, reason: 'next');
+  }
 
-  /// Moves to the previous sentence. No-op (and [canGoPrevious] is false) on
-  /// the first sentence.
-  Future<void> previousSentence() =>
-      _transitionToSentence(_currentIndex - 1, play: false, reason: 'previous');
+  /// Moves to the previous sentence. If already on the first sentence and
+  /// [onPreviousLessonRequested] is provided, triggers navigation to previous lesson.
+  Future<void> previousSentence() async {
+    if (!canGoPrevious) {
+      onPreviousLessonRequested?.call();
+      return;
+    }
+    await _transitionToSentence(_currentIndex - 1, play: false, reason: 'previous');
+  }
 
   /// Jumps to the sentence at [index]. Out-of-range indices are ignored.
   ///
@@ -632,6 +745,7 @@ class SentencePlayerController extends ChangeNotifier {
     _disposed = true;
     _watchdog?.cancel();
     _watchdog = null;
+    _cancelGapTimer();
     // Cancel listeners synchronously so no callback fires after teardown
     // (avoids leaked / duplicate listeners and post-dispose notifyListeners).
     final posSub = _positionSub;
@@ -688,6 +802,116 @@ class SentencePlayerController extends ChangeNotifier {
     unawaited(errSub?.cancel());
   }
 
+  /// 动态热切换句子切分模式（2026-09-30 方案B：初学意群 ⇄ 熟读分句）：
+  /// 保持当前底层音频播放与位置不中断，平滑将播放器句列表切换为目标列表，
+  /// 并自动将当前句下标对齐到覆盖当前播放时间（或指定的 targetIndex）的句子。
+  void switchSentenceList(List<Sentence> newSentences, {int? targetIndex}) {
+    if (newSentences.isEmpty) return;
+    _sentences = List<Sentence>.unmodifiable(newSentences);
+    if (targetIndex != null) {
+      _currentIndex = targetIndex.clamp(0, _sentences.length - 1);
+    } else {
+      final posMs = _currentPosition.inMilliseconds;
+      int match = 0;
+      for (var i = 0; i < _sentences.length; i++) {
+        if (posMs >= _sentences[i].startMs && posMs < _sentences[i].endMs) {
+          match = i;
+          break;
+        } else if (posMs < _sentences[i].startMs) {
+          match = (i > 0) ? i - 1 : 0;
+          break;
+        }
+      }
+      _currentIndex = match.clamp(0, _sentences.length - 1);
+    }
+    notifyListeners();
+  }
+
+  /// 原地平滑切换音频源与句子序列（精听页面直接切课支持）：
+  /// 停止旧音频，重设音频底层源、更新句子序列并归零位置，保持同一个控制器实例。
+  Future<void> replaceAudioSource({
+    required String audioAsset,
+    required bool isFile,
+    required List<Sentence> sentences,
+    int initialIndex = 0,
+    bool autoPlay = true,
+  }) async {
+    assert(sentences.isNotEmpty, 'sentences must not be empty');
+    if (_disposed) return;
+    _generation++;
+    final gen = _generation;
+    _watchdog?.cancel();
+    _cancelGapTimer();
+    _restartPending = false;
+    _isPlaying = false;
+    _assetPath = audioAsset;
+    audioIsFile = isFile;
+    _sentences = List<Sentence>.unmodifiable(sentences);
+    _currentIndex = initialIndex.clamp(0, _sentences.length - 1);
+    _repeatRemaining = _repeatTarget == 0 ? -1 : _repeatTarget;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await _facade.pause();
+      if (_disposed || gen != _generation) return;
+
+      if (_useClipPlaylist) {
+        final clips = [
+          for (final s in _sentences)
+            SentenceClip(
+              index: s.index,
+              start: Duration(milliseconds: s.startMs),
+              end: Duration(milliseconds: s.endMs),
+            ),
+        ];
+        await _facade.loadPlaylist(
+          path: _assetPath,
+          isFile: audioIsFile,
+          clips: clips,
+          initialIndex: _currentIndex,
+        );
+        await _facade.setLoopOne(_repeatTarget == 0);
+      } else {
+        if (audioIsFile) {
+          await _facade.setFilePath(_assetPath);
+        } else {
+          await _facade.setAsset(_assetPath);
+        }
+      }
+      if (_disposed || gen != _generation) return;
+
+      final start = Duration(milliseconds: currentSentence.startMs);
+      _pendingSeekTargetMs = currentSentence.startMs;
+      if (_useClipPlaylist) {
+        await _facade.seekSentence(_currentIndex, start);
+      } else {
+        await _facade.seek(start);
+      }
+      if (_disposed || gen != _generation) return;
+
+      _currentPosition = start;
+      _isInitialized = true;
+      if (_playbackRate != 1.0) {
+        await _facade.setSpeed(_playbackRate);
+        if (_disposed || gen != _generation) return;
+      }
+
+      if (autoPlay) {
+        _isPlaying = true;
+        _completionHandled = false;
+        notifyListeners();
+        await _facade.play();
+        if (_disposed || gen != _generation) return;
+        _startWatchdog(currentSentence);
+      } else {
+        notifyListeners();
+      }
+    } catch (error, stackTrace) {
+      _handlePlaybackError('replaceAudioSource', error, stackTrace);
+    }
+  }
+
   void _onEngineSentenceIndex(int index) {
     if (_disposed || !_isPlaying || _restartPending) return;
     // 单音源（连续流）路径：engine 的 playlist index 恒为 0，与句索引无关。
@@ -725,6 +949,7 @@ class SentencePlayerController extends ChangeNotifier {
     String reason = 'manual',
   }) async {
     if (!_isInitialized || hasError || _disposed || _isSwitchingSource) return;
+    _cancelGapTimer(); // 切句作废进行中的句间等待（含 _gapWaitActive）
     if (_errorMessage == 'Unable to switch playback mode.') {
       _errorMessage = null;
       notifyListeners();
@@ -752,10 +977,12 @@ class SentencePlayerController extends ChangeNotifier {
       if (_useClipPlaylist) {
         await _facade.setLoopOne(shouldLoopNative);
         if (!alreadyAtTarget) {
+          _pendingSeekTargetMs = sentence.startMs;
           await _facade.seekSentence(targetIndex, start);
           if (_disposed || gen != _generation) return;
         }
       } else {
+        _pendingSeekTargetMs = sentence.startMs;
         await _facade.seek(start);
         if (_disposed || gen != _generation) return;
       }
@@ -784,6 +1011,17 @@ class SentencePlayerController extends ChangeNotifier {
 
   void _onPosition(Duration position) {
     if (_disposed || _restartPending) return;
+    if (_gapWaitActive) return; // 句间静默等待：position 无意义，整体忽略
+
+    // 卫兵：底层引擎刚发起 seek 时，若 positionStream 仍抛出旧位置的陈旧采样，予以过滤
+    if (_pendingSeekTargetMs != null) {
+      final diff = (position.inMilliseconds - _pendingSeekTargetMs!).abs();
+      if (diff > 1000) {
+        return; // 过滤 stale position，防止触发错误跳句
+      }
+      _pendingSeekTargetMs = null; // 已进入新区间，解除卫兵
+    }
+
     final cur = currentSentence;
     final end = Duration(milliseconds: cur.endMs);
     final shouldLoop = _repeatRemaining == -1 || _repeatRemaining > 1;
@@ -805,6 +1043,13 @@ class SentencePlayerController extends ChangeNotifier {
       // The subtitle of current sentence remains on screen throughout the gap
       // until the next sentence actually begins speaking (position >= nextStart).
       if (!_skipSilence) {
+        // 句间间隔（v0.9.1 课堂带读）：用户显式设置间隔后，句子读完即停，
+        // 等待间隔后由 [_finishCurrentSentence] 跳下一句——覆盖「自然流动」
+        // 行为，否则课文原声的句间停顿长度不可控。
+        if (_sentenceGapMs > 0 && _isPlaying && position >= end && canGoNext) {
+          _finishCurrentSentence(position);
+          return;
+        }
         if (position >= nextStart) {
           _advanceToNextSentenceNatural(position);
           return;
@@ -852,13 +1097,41 @@ class SentencePlayerController extends ChangeNotifier {
   /// Advances the index without calling seek(), keeping audio and video completely gapless.
   void _advanceToNextSentenceNatural(Duration position) {
     if (_disposed || _restartPending || !canGoNext) return;
-    _currentIndex++;
+    final next = _sentences[_currentIndex + 1];
+    final posMs = position.inMilliseconds;
+    // 防御性校验：如果 position 严重超前下一句（例如大于下句结束 1500ms），
+    // 表明 position 发生突跳或拖拽，直接精准定位到包含该 position 的目标句，杜绝每帧++级联滚屏
+    if (posMs > next.endMs + 1500) {
+      final targetIdx = _findSentenceIndexForPosition(posMs);
+      if (targetIdx != -1 && targetIdx != _currentIndex) {
+        _currentIndex = targetIdx;
+      } else {
+        return;
+      }
+    } else {
+      _currentIndex++;
+    }
     _repeatRemaining = _repeatTarget == 0 ? -1 : _repeatTarget;
     _currentPosition = position;
     _completionHandled = false;
     _restartPending = false;
     notifyListeners();
     _startWatchdog(currentSentence);
+  }
+
+  /// 根据时间戳毫秒数精准定位句子下标
+  int _findSentenceIndexForPosition(int posMs) {
+    for (int i = 0; i < _sentences.length; i++) {
+      if (posMs >= _sentences[i].startMs && posMs <= _sentences[i].endMs) {
+        return i;
+      }
+      if (i < _sentences.length - 1 &&
+          posMs > _sentences[i].endMs &&
+          posMs < _sentences[i + 1].startMs) {
+        return i; // 落在两句之间的停顿空白
+      }
+    }
+    return -1;
   }
 
   /// Native completion from a clip-enforcing source: the engine has already
@@ -884,6 +1157,23 @@ class SentencePlayerController extends ChangeNotifier {
 
     _logAutoAdvance(sentence, triggerPosition);
 
+    // WP-H 跟读验收门（方案 §五）：非 null 时每句播完停在句末并回调，
+    // 不再自动跳下一句、也不再循环本句——节奏全部交给跟读会话。
+    // 位置刻意在「循环本句」分支之前：repeatTarget=0（无限循环）时
+    // shouldLoop 恒真并从循环分支提前 return，门若只在自动推进分支前
+    // 插入，无限循环用户的跟读门将永远不触发。gate 为 null 时本段
+    // 完全不执行，非跟读路径时序零改变（时间戳/高亮/定位一律不动）。
+    if (readAlongGate != null) {
+      _isPlaying = false;
+      _restartPending = false;
+      notifyListeners();
+      try {
+        await _facade.pause();
+      } catch (_) {}
+      await readAlongGate!(_currentIndex);
+      return; // 不自动推进，节奏交给跟读会话
+    }
+
     // Auto-loop (V0.2 §4): unless the repeat target is exhausted, restart the
     // sentence from startMs. A captured generation aborts the restart if the
     // user did something else meanwhile (pause / switch / dispose).
@@ -896,7 +1186,12 @@ class SentencePlayerController extends ChangeNotifier {
       // The native player has ALREADY looped back to start of the clip and is
       // already sounding. Calling seek() and play() here forces a redundant seek,
       // creating an audible stutter / double-reading the first word.
-      if (_useClipPlaylist && (_repeatTarget == 0 || _repeatRemaining > 0)) {
+      //
+      // 句间间隔例外：间隔 > 0 时原生循环必须让位——间隔的意义就是两次播放
+      // 之间静默等待，原生即时循环会跳过等待，所以此时走通用 seek+play 路径。
+      if (_useClipPlaylist &&
+          _sentenceGapMs <= 0 &&
+          (_repeatTarget == 0 || _repeatRemaining > 0)) {
         _currentPosition = Duration(milliseconds: sentence.startMs);
         _isPlaying = true;
         _completionHandled = false;
@@ -906,6 +1201,37 @@ class SentencePlayerController extends ChangeNotifier {
           unawaited(_facade.setLoopOne(false));
         }
         notifyListeners();
+        return;
+      }
+
+      unawaited(_facade.pause()); // 间隔期间静音（video 源音频仍在播）
+        // 句间间隔（v0.9.1）：先静默等待，再重启本句。
+      if (_sentenceGapMs > 0) {
+        _isPlaying = false;
+        _restartPending = false;
+        _currentPosition = Duration(milliseconds: sentence.endMs);
+        _gapWaitActive = true;
+        notifyListeners();
+        await _waitForGap(_sentenceGapMs, gen, () async {
+          _gapWaitActive = false;
+          _restartPending = true;
+          try {
+            final start = Duration(milliseconds: sentence.startMs);
+            await _facade.seek(start);
+            if (_disposed || gen != _generation) return;
+            _currentPosition = start;
+            _isPlaying = true;
+            _completionHandled = false;
+            notifyListeners();
+            await _facade.play();
+            if (_disposed || gen != _generation) return;
+            _restartPending = false;
+            _startWatchdog(sentence);
+          } catch (error, stackTrace) {
+            _restartPending = false;
+            _handlePlaybackError('loop', error, stackTrace);
+          }
+        });
         return;
       }
 
@@ -937,6 +1263,24 @@ class SentencePlayerController extends ChangeNotifier {
     // stop. Auto-advance always keeps playing — the unified transition with
     // play: true.
     if (canGoNext && !_disposed) {
+      unawaited(_facade.pause()); // 间隔期间静音
+      // 句间间隔（v0.9.1）：跳下一句前也等待（课堂带读的句间停顿）。
+      if (_sentenceGapMs > 0) {
+        final gen = _generation;
+        // 目标下标在等待开始时就固定：等待期间任何下标漂移都不允许改变
+        // 这次自动推进的落点（2026-09-29 实测：位置流在等待期间触发自然
+        // 过渡 +1，回调再 +1 → 从第 1 句直接跳到第 3 句）。
+        final nextIndex = _currentIndex + 1;
+        _isPlaying = false;
+        _restartPending = false;
+        _gapWaitActive = true;
+        notifyListeners();
+        await _waitForGap(_sentenceGapMs, gen, () async {
+          _gapWaitActive = false;
+          await _transitionToSentence(nextIndex, play: true, reason: 'auto');
+        });
+        return;
+      }
       await _transitionToSentence(_currentIndex + 1, play: true, reason: 'auto');
       return;
     }
@@ -947,6 +1291,16 @@ class SentencePlayerController extends ChangeNotifier {
       await _facade.pause();
     } catch (error, stackTrace) {
       _handlePlaybackError('auto-pause', error, stackTrace);
+    }
+    // 课文最后一句自然播完：若外部注册了下一课回调，则自动切入下一课
+    if (!canGoNext) {
+      if (_lessonLoop) {
+        // 整课循环：回到第一句继续播放，不切课
+        unawaited(_facade.pause());
+        await _transitionToSentence(0, play: true, reason: 'lesson-loop');
+      } else {
+        onNextLessonRequested?.call();
+      }
     }
   }
 

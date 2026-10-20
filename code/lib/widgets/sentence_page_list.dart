@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import '../models/sentence.dart';
 import '../preferences/app_preferences.dart';
 import '../theme/listenloop_theme.dart';
+import 'chinese_textbook_ruby_layout.dart';
 
 /// 单页文本 / Transcript mode (virtualized ListView.builder for 1000+ items):
 /// * current sentence: English near-white + Chinese secondary, with a 2px
@@ -17,8 +18,10 @@ class SentencePageList extends StatefulWidget {
     super.key,
     required this.sentences,
     required this.currentIndex,
+    this.currentPosition,
     required this.showEnglish,
     required this.showChinese,
+    this.isChineseMode = false,
     required this.onSentenceTap,
     this.itemKeys = const [],
     required this.preferences,
@@ -28,8 +31,10 @@ class SentencePageList extends StatefulWidget {
   });
   final List<Sentence> sentences;
   final int currentIndex;
+  final Duration? currentPosition;
   final bool showEnglish;
   final bool showChinese;
+  final bool isChineseMode;
   final ValueChanged<int> onSentenceTap;
 
   /// Optional item keys for backwards compatibility.
@@ -87,14 +92,16 @@ class _SentencePageListState extends State<SentencePageList>
         ..reset()
         ..forward();
 
-      if (!_userScrolling) {
-        _autoScrollToIndex(newIndex);
-      }
+      // 切句发生时，无论之前是否划动过，立即解除阻断让动画跟上新句子
+      _userScrolling = false;
+      _resumeTimer?.cancel();
+      _autoScrollToIndex(newIndex);
     } else if (!identical(widget.sentences, oldWidget.sentences)) {
       _fromIndex = null;
       _transition.reset();
     }
-    if (widget.revealToken != oldWidget.revealToken && !_userScrolling) {
+    if (widget.revealToken != oldWidget.revealToken) {
+      _userScrolling = false;
       _autoScrollToIndex(widget.currentIndex);
     }
   }
@@ -126,7 +133,6 @@ class _SentencePageListState extends State<SentencePageList>
       }
       if (_userScrolling) return;
       final position = _scrollController.position;
-      final viewport = position.viewportDimension;
       final headerExtent = widget.header != null ? 120.0 : 0.0;
 
       // Correction: find any mounted row and compare its real document
@@ -154,13 +160,18 @@ class _SentencePageListState extends State<SentencePageList>
           mountedCtx,
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
-          alignment: 0.32,
+          alignment: _targetAlignment(mountedCtx),
         );
         return;
       }
 
+      // 估算路径：还没挂载，先按"卡片底边落屏幕中线"反推目标滚动量。
+      final estRowHeight = _estimatedRowHeight;
       final target =
-          ((index * _estimatedRowHeight) + headerExtent + correction - viewport * 0.32)
+          ((index * estRowHeight) +
+                  headerExtent +
+                  correction -
+                  _desiredRowTopInViewport(estRowHeight))
               .clamp(position.minScrollExtent, position.maxScrollExtent);
       _scrollController.jumpTo(target);
 
@@ -175,13 +186,49 @@ class _SentencePageListState extends State<SentencePageList>
             ctx,
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
-            alignment: 0.32,
+            alignment: _targetAlignment(ctx),
           );
         } else if (attempt < 4) {
           _alignToIndex(index, attempt: attempt + 1);
         }
       });
     });
+  }
+
+  /// 当前句卡片应该落在什么位置。
+  ///
+  /// 2026-10-20 郭老师：「初读时定位字幕的形状有点偏上，应该再下来一点，
+  /// 形状的底与**画面中线**重合」——这里的"中线"指**手机屏幕**的中线
+  /// （不是字幕区自己的中线）。所以拿**屏幕高度**算：卡片底边 = 屏幕高的一半。
+  ///
+  /// 返回值是 [Scrollable.ensureVisible] 的 alignment：卡片**上沿**在视口
+  /// 里的落点比例（0 = 顶边贴视口顶，1 = 底边贴视口底）。
+  double _targetAlignment(BuildContext rowContext) {
+    final rowBox = rowContext.findRenderObject();
+    final rowHeight =
+        rowBox is RenderBox && rowBox.attached && rowBox.hasSize
+            ? rowBox.size.height
+            : _estimatedRowHeight;
+    final viewport = _scrollController.hasClients
+        ? _scrollController.position.viewportDimension
+        : 1.0;
+    if (viewport <= 0) return 0.32;
+    return (_desiredRowTopInViewport(rowHeight) / viewport).clamp(0.0, 1.0);
+  }
+
+  /// 卡片上沿在视口里的目标位置（视口坐标，px）。
+  ///
+  /// 卡片底边要落在**手机屏幕**的中线 → 上沿 = 屏幕中线 − 卡片高；
+  /// 再减去视口顶边在屏幕坐标里的位置，换算成视口内坐标。
+  double _desiredRowTopInViewport(double rowHeight) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    // 视口顶边在屏幕坐标里的位置：列表自身的渲染盒（= 可视区域）。
+    double viewportTop = 0.0;
+    final viewportBox = context.findRenderObject();
+    if (viewportBox is RenderBox && viewportBox.attached && viewportBox.hasSize) {
+      viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+    }
+    return screenHeight / 2 - rowHeight - viewportTop;
   }
 
   @override
@@ -212,8 +259,10 @@ class _SentencePageListState extends State<SentencePageList>
     if (!_scrollController.hasClients) return widget.currentIndex;
     final offset = _scrollController.offset;
     final headerExtent = widget.header != null ? 120.0 : 0.0;
-    final viewport = _scrollController.position.viewportDimension;
-    final focusY = viewport * 0.32;
+    // 焦点线 = **手机屏幕**的中线（与定位对齐同一把尺，见 _desiredRowTopInViewport）。
+    // 手指滑动时"当前句"跟着焦点线走，两处必须一致，否则会出现"看着在读
+    // 上一句、进度却记到下一句"的错位。
+    final focusY = _desiredRowTopInViewport(0).clamp(0.0, double.infinity);
 
     int bestIndex = -1;
     double minDiff = double.infinity;
@@ -245,7 +294,7 @@ class _SentencePageListState extends State<SentencePageList>
         _resumeTimer?.cancel();
       } else {
         _resumeTimer?.cancel();
-        _resumeTimer = Timer(const Duration(seconds: 3), () {
+        _resumeTimer = Timer(const Duration(milliseconds: 600), () {
           if (mounted) {
             _userScrolling = false;
           }
@@ -354,8 +403,10 @@ class _SentencePageListState extends State<SentencePageList>
       sentence: sentence,
       index: index,
       isCurrent: index == widget.currentIndex,
+      currentPosition: index == widget.currentIndex ? widget.currentPosition : null,
       showEnglish: widget.showEnglish,
       showChinese: widget.showChinese,
+      isChineseMode: widget.isChineseMode,
       preferences: widget.preferences,
       palette: context.ll,
       onSentenceTap: widget.onSentenceTap,
@@ -390,8 +441,10 @@ class _SentenceRow extends StatelessWidget {
     required this.sentence,
     required this.index,
     required this.isCurrent,
+    this.currentPosition,
     required this.showEnglish,
     required this.showChinese,
+    this.isChineseMode = false,
     required this.preferences,
     required this.palette,
     required this.onSentenceTap,
@@ -400,8 +453,10 @@ class _SentenceRow extends StatelessWidget {
   final Sentence sentence;
   final int index;
   final bool isCurrent;
+  final Duration? currentPosition;
   final bool showEnglish;
   final bool showChinese;
+  final bool isChineseMode;
   final AppPreferences preferences;
   final LLPalette palette;
   final ValueChanged<int> onSentenceTap;
@@ -409,21 +464,28 @@ class _SentenceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ll = palette;
+    final shape = context.llShape;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
       margin: const EdgeInsets.symmetric(vertical: 2),
       padding: const EdgeInsets.only(left: 10),
       decoration: BoxDecoration(
-        color: isCurrent
-            ? ll.textPrimary.withValues(alpha: 0.04)
-            : Colors.transparent,
+        // 2026-10-20 郭老师：句子统一成「卡片流」——每一句都是同形态的卡片，
+        // 层级只靠「左边框 + 字重/字色」区分；原先未选中完全透明底、
+        // 选中底又几乎看不见，视觉上像一半有底一半没底。
+        color: ll.textPrimary.withValues(alpha: isCurrent ? 0.06 : 0.02),
         borderRadius: BorderRadius.circular(LLRadius.small),
         border: Border(
-          left: BorderSide(
-            width: 3,
-            color: isCurrent ? ll.textPrimary : Colors.transparent,
-          ),
+          left: isCurrent
+              // 选中框粗细吃 `shape.rule`——这是该令牌的设计用途
+              // （"Emphasis border width (当前句选中框)"）。此前这里写死 3，
+              // 于是书院那套 `rule: 2` 的"双线"语言在全库零处生效。
+              //
+              // 未选中必须是 BorderSide.none 而不是 width: 0 —— 后者会让
+              // RenderDecoratedBox.paint 抛断言（BorderSide 要求 width > 0）。
+              ? BorderSide(width: shape.rule, color: ll.textPrimary)
+              : BorderSide.none,
         ),
       ),
       child: InkWell(
@@ -439,38 +501,59 @@ class _SentenceRow extends StatelessWidget {
                 curve: Curves.easeOutCubic,
                 style: LLText.counter.copyWith(
                   fontSize: 12,
-                  color: isCurrent ? ll.textPrimary : ll.textTertiary,
+                  color: isCurrent ? ll.textPrimary : ll.textSecondary,
                 ),
                 child: Text('${index + 1}'),
               ),
-              if (showEnglish)
+              if (isChineseMode) ...[
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 260),
-                    curve: Curves.easeOutCubic,
-                    style: LLLearning.transcriptEnglish(
-                      ll,
-                      preferences,
-                      current: isCurrent,
+                  padding: const EdgeInsets.only(top: 6),
+                  child: ChineseTextbookRubyLayout(
+                    text: sentence.originalText,
+                    charSize: (20 * preferences.textScale).clamp(6.0, 36.0),
+                    charStyle: TextStyle(
+                      fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
+                      color: isCurrent ? ll.textPrimary : ll.textSecondary,
                     ),
-                    child: Text(sentence.english),
+                    chineseFontFamily: preferences.learningChineseFont.family,
+                    textAlign: TextAlign.left,
+                    wordSpacing: 6.0,
+                    lineSpacing: 10.0,
+                    activeCharIndex: isCurrent && currentPosition != null
+                        ? sentence.activeCharIndexAt(currentPosition!.inMilliseconds)
+                        : null,
                   ),
                 ),
-              if (showChinese)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 260),
-                    curve: Curves.easeOutCubic,
-                    style: LLLearning.transcriptChinese(
-                      ll,
-                      preferences,
-                      current: isCurrent,
+              ] else ...[
+                if (showEnglish)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      style: LLLearning.transcriptEnglish(
+                        ll,
+                        preferences,
+                        current: isCurrent,
+                      ),
+                      child: Text(sentence.english),
                     ),
-                    child: Text(sentence.chinese),
                   ),
-                ),
+                if (showChinese)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      style: LLLearning.transcriptChinese(
+                        ll,
+                        preferences,
+                        current: isCurrent,
+                      ),
+                      child: Text(sentence.chinese),
+                    ),
+                  ),
+              ],
             ],
           ),
         ),

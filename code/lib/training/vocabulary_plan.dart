@@ -22,6 +22,7 @@ library;
 
 import '../models/vocabulary_model.dart';
 import 'dictation_engine.dart';
+import 'word_frequency.dart';
 
 /// 学习组件白名单。
 ///
@@ -128,10 +129,21 @@ class VocabularyPlanner {
   /// **Item 级（一个词一张卡）**，所以计划不需要额外传参就能与复习对齐。
   /// 没有卡（`srs == null`）时返回 null，已掌握的词一律不出组件：
   /// 宁可少出，也不凭空声称「到期」。
+  ///
+  /// [frequency]（可选）：词频表。**只在候选池之间调整出现顺序**（低频优先，
+  /// §20.4 P0），用于决定「新卡配额」里先练哪 5 个。传 null 时保持原顺序
+  /// （最近见到优先），不改变任何既有行为。
+  ///
+  /// 三条边界（§20.3/§20.4，必须守住）：
+  ///   * 词频**不参与** SRS 间隔数学 —— 不动 `dueAt` / `easeFactor` / `intervalDays`；
+  ///   * 词频**不覆盖**听写证据规则 —— 高频词听错了照样出「原声回听」，
+  ///     因为「听不清高频词」恰恰是听力问题，不能因为「这词常见」就不练；
+  ///   * 词频**不改**队列构成 —— 到期的就是到期，低频词不会把没到期的卡拉进来。
   List<VocabularyPlanEntry> build(
     Iterable<VocabularyItem> items, {
     DateTime? now,
     DateTime? Function(VocabularyItem item)? dueAt,
+    WordFrequency? frequency,
   }) {
     final stamp = now ?? DateTime.now();
     final resolveDue = dueAt ?? _defaultDueAt;
@@ -139,9 +151,18 @@ class VocabularyPlanner {
     var newUsed = 0;
     var reviewUsed = 0;
 
-    // 最近见到的排前面：与生词本列表同一顺序，避免两处观感不一致。
-    final sorted = items.toList()
-      ..sort((a, b) => b.lastSeenAt.compareTo(a.lastSeenAt));
+    // 候选池之间：低频优先（词频越罕见越该先练），同优先级按最近见到倒序；
+    // 非候选词：保持最近见到倒序。与生词本列表同一观感，避免两处不一致。
+    final sorted = items.toList()..sort((a, b) {
+      if (frequency != null &&
+          a.status == VocabularyStatus.candidate &&
+          b.status == VocabularyStatus.candidate) {
+        final pa = frequency.priorityOf(a.surfaceForm);
+        final pb = frequency.priorityOf(b.surfaceForm);
+        if (pa != pb) return pb.compareTo(pa);
+      }
+      return b.lastSeenAt.compareTo(a.lastSeenAt);
+    });
 
     for (final item in sorted) {
       if (item.status == VocabularyStatus.ignored) continue;

@@ -18,12 +18,16 @@ class ParsedLessonPackage {
     required this.audioFileName,
     this.coverBytes,
     this.coverFileName,
+    this.extraFiles = const {},
   });
 
   final LessonManifest manifest;
   final List<Sentence> sentences;
   final Uint8List audioBytes;
   final String audioFileName;
+
+  /// Companion files (e.g. fluent.json / chunks.json)
+  final Map<String, Uint8List> extraFiles;
 
   /// Cover image bytes, or null when the package has no cover.
   final Uint8List? coverBytes;
@@ -137,6 +141,15 @@ class LessonPackageReader {
       // Declared but absent cover is tolerated — the cover is decorative.
     }
 
+    final extraFiles = <String, Uint8List>{};
+    for (final f in archive.files) {
+      if (f.name.endsWith('.json') &&
+          f.name != 'manifest.json' &&
+          f.name != manifest.sentenceFile) {
+        extraFiles[f.name] = Uint8List.fromList(_bytes(f));
+      }
+    }
+
     return ParsedLessonPackage(
       manifest: manifest,
       sentences: sentences,
@@ -144,6 +157,7 @@ class LessonPackageReader {
       audioFileName: _baseName(manifest.audioFile),
       coverBytes: coverBytes,
       coverFileName: coverFileName,
+      extraFiles: extraFiles,
     );
   }
 
@@ -234,6 +248,12 @@ class LessonPackageReader {
       );
     }
 
+    final rawCharStarts = json['charStarts'];
+    List<int>? charStarts;
+    if (rawCharStarts is List) {
+      charStarts = rawCharStarts.map((c) => (c as num).toInt()).toList();
+    }
+
     return Sentence(
       id: id,
       index: index,
@@ -241,6 +261,7 @@ class LessonPackageReader {
       endMs: endMs,
       english: english,
       chinese: chinese,
+      charStarts: charStarts,
     );
   }
 

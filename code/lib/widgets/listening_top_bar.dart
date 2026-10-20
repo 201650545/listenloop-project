@@ -14,7 +14,8 @@ class ListeningTopBar extends StatelessWidget {
     required this.sentenceCount,
     this.leading,
     this.trailing,
-    this.slotWidth = 48,
+    this.leadingSlotWidth = 48,
+    this.trailingSlotWidth = 48,
   });
 
   final int displayIndex;
@@ -26,12 +27,16 @@ class ListeningTopBar extends StatelessWidget {
   /// Presentation toggle (fluid ⇄ single-page transcript), pinned right.
   final Widget? trailing;
 
-  /// Width reserved on **both** sides.
+  /// Width reserved on the left side only.
   ///
-  /// The counter is centred by giving left and right identical slots, so this
-  /// must be widened as a pair — adding a second right-hand icon without
-  /// widening the left slot would push the counter off-centre (and overflow).
-  final double slotWidth;
+  /// 左右槽宽独立：中文课时左槽 1 枚（初读/熟读分段器）、右槽 3 枚
+  /// （跟读验收/课文目录/显示模式）；英文课时左槽 1 枚（AI 伴学）、右槽
+  /// 4 枚（听写/more/课文目录/显示模式）。原先两侧共用同一个 slotWidth
+  /// 并取较大值，会让一侧顶到屏幕外（RenderFlex overflowed by 56px）。
+  final double leadingSlotWidth;
+
+  /// Width reserved on the right side only.
+  final double trailingSlotWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -39,12 +44,16 @@ class ListeningTopBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       child: SizedBox(
-        height: 32,
+        // WP-G 终审实测：原 32 高把里面的 IconButton 压成 40×32dp，低于
+        // 总纲「触摸热区 ≥48×48dp」（也低于 WCAG 2.5.5）。抬到 48 后，
+        // 槽位里的 3×48 图标（slotWidth 144）刚好各得一个 48×48 的热区，
+        // 顶栏也仍然是"贴着状态栏的一条静带"，不是一行按钮。
+        height: 48,
         child: Row(
           children: [
             // Balances the trailing toggle's width so the counter stays
             // truly centred while leading and trailing sit flush left/right.
-            SizedBox(width: slotWidth, child: Center(child: leading)),
+            SizedBox(width: leadingSlotWidth, child: Center(child: leading)),
             Expanded(
               // 「总句数被挤到下面挡住」修复（2026-09-25 用户反馈）：
               // 顶栏右侧图标从 2 个变 3 个后槽位吃紧，无防换行约束的
@@ -65,7 +74,7 @@ class ListeningTopBar extends StatelessWidget {
                 ),
               ),
             ),
-            SizedBox(width: slotWidth, child: Center(child: trailing)),
+            SizedBox(width: trailingSlotWidth, child: Center(child: trailing)),
           ],
         ),
       ),

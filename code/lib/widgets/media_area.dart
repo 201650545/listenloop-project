@@ -47,6 +47,10 @@ class MediaArea extends StatelessWidget {
   Widget _defaultVisual(LLPalette ll) => Container(
     color: ll.surfaceHigh,
     alignment: Alignment.center,
-    child: LLMark(size: 44, color: ll.textTertiary),
+    // WP-G 终审实测：textTertiary 压 surfaceHigh，八张色板里 6 张低于 3.0
+    // （2.67~2.98），而这块是"无封面课时"唯一的主视觉——低声不等于看不见。
+    // 换 textSecondary 后八张实测 4.64~6.45，仍靠 44dp 的小尺度和细笔画
+    // 保持克制，不抢课文。
+    child: LLMark(size: 44, color: ll.textSecondary),
   );
 }

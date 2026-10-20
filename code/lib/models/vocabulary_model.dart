@@ -13,6 +13,8 @@
 ///   3. **SRS 调度挂在 Item 级** —— 一个词一张卡，而不是一句一张卡。
 library;
 
+import 'package:fsrs/fsrs.dart' as fsrs;
+
 import '../training/lemma_normalizer.dart';
 
 /// 词条形态：单字/单词，还是一个短语（`take off`）。
@@ -246,13 +248,35 @@ enum ReviewRating {
 
   /// 是否算"通过了这次复习"（用于练习记录里的 passed）。
   bool get isPass => this != ReviewRating.again;
+
+  /// 映射到 FSRS 的四档评级。
+  fsrs.Rating get toFsrs => switch (this) {
+        ReviewRating.again => fsrs.Rating.again,
+        ReviewRating.hard => fsrs.Rating.hard,
+        ReviewRating.good => fsrs.Rating.good,
+        ReviewRating.easy => fsrs.Rating.easy,
+      };
 }
 
 /// Item 级 SRS 调度状态（派生规则 3：**调度挂在 Item 级，一个词一张卡**）。
 ///
-/// 算法沿用既有实现（SM-2 简化版）：Again 10 分钟、Good 首次 1 天/二次 3 天、
-/// Easy 首次 3 天/二次 7 天、ease 夹在 1.3~3.0、间隔 ≥21 天视为已掌握。
-/// 手感与旧闪卡一致，避免同一个 App 里两种复习节奏。
+/// **算法：FSRS（P1 落地）** —— 见 `10_生词本与Anki记忆卡设计.md` §20.4/§22。
+/// 用 [`fsrs`](https://pub.dev/packages/fsrs)（`open-spaced-repetition/py-fsrs@6fd0857`
+/// 的 Dart 移植，MIT）替换原来的 SM-2 简化版：
+///
+/// * **间隔由 stability / difficulty 双变量决定**，`next_interval` 由目标保持率
+///   （`desiredRetention = 0.9`）反推，不再是"首次 1 天、二次 3 天"这种固定步长；
+/// * **Again 走 relearning**（10 分钟后再来，`lapses` +1），不重置 stability；
+/// * **旧 SM-2 存档平滑迁移**：首次评级时若没有 FSRS 状态，会用既有
+///   `intervalDays` / `easeFactor` 反推一个等效的 stability / difficulty，
+///   并把 `lastReviewedAt` 作为 `lastReview` 喂给 FSRS —— 用户的历史进度不丢；
+/// * **对外字段保持兼容**：`dueAt` / `intervalDays` / `easeFactor` / `reviews` /
+///   `lapses` / `lastReviewedAt` 照旧，供 `VocabularyReviewQueue.weaknessScore`、
+///   复习页 UI、`isDue` / `isMastered` 直接复用，**不改任何消费方**；
+/// * `easeFactor` 由 FSRS `difficulty`（1.0~10.0）线性映射到 1.3~3.0，
+///   与旧 SM-2 口径一致，弱项优先排序的手感不变。
+///
+/// 用途边界与 P0 相同：**词频不参与这里的任何数学**；排序在 `VocabularyReviewQueue`。
 class VocabularySrs {
   const VocabularySrs({
     required this.dueAt,
@@ -261,6 +285,7 @@ class VocabularySrs {
     this.easeFactor = 2.5,
     this.lapses = 0,
     this.lastReviewedAt,
+    this.fsrsState,
   });
 
   /// 建卡：刚升入学习队列、还没复习过。
@@ -268,18 +293,23 @@ class VocabularySrs {
 
   final DateTime dueAt;
 
-  /// 连续通过次数（Again 归零）。
+  /// 已复习次数（含 Again；与旧 SM-2 同口径，用于迁移与展示）。
   final int reviews;
 
-  /// 当前间隔（天）。
+  /// 当前间隔（天）—— 由 FSRS 的 dueAt 与 lastReviewedAt 派生。
   final double intervalDays;
 
+  /// 由 FSRS `difficulty` 映射到 SM-2 口径的 ease（1.3~3.0，基线 2.5）。
   final double easeFactor;
 
-  /// 遗忘次数 —— 旧闪卡缺这个字段，是 07 号文档点出的缺陷之一。
+  /// 遗忘次数（FSRS 进入 Relearning 的次数）—— 07 号文档点出的缺陷之一。
   final int lapses;
 
   final DateTime? lastReviewedAt;
+
+  /// FSRS 卡片状态的 JSON（`fsrs.Card.toMap()`）。**null = 尚未初始化 FSRS 卡**
+  /// （旧 SM-2 存档或全新卡），首次 `applyRating` 时自动迁移。
+  final Map<String, Object?>? fsrsState;
 
   bool get isNew => lastReviewedAt == null;
 
@@ -288,56 +318,72 @@ class VocabularySrs {
 
   bool isDue(DateTime now) => !dueAt.isAfter(now);
 
-  /// 应用一次评级，返回新的调度状态。
+  /// 应用一次评级，返回新的调度状态（FSRS）。
   VocabularySrs applyRating(ReviewRating rating, {DateTime? now}) {
-    final stamp = now ?? DateTime.now();
-    var nextReviews = reviews;
-    var nextInterval = intervalDays;
-    var nextEase = easeFactor;
-    var nextLapses = lapses;
-
-    switch (rating) {
-      case ReviewRating.again:
-        nextReviews = 0;
-        nextInterval = 0;
-        nextEase = (easeFactor - 0.2) < 1.3 ? 1.3 : (easeFactor - 0.2);
-        nextLapses++;
-      case ReviewRating.hard:
-        nextInterval = intervalDays <= 0 ? 1.0 : intervalDays * 1.2;
-        nextEase = (easeFactor - 0.15) < 1.3 ? 1.3 : (easeFactor - 0.15);
-      case ReviewRating.good:
-        if (reviews == 0) {
-          nextInterval = 1.0;
-        } else if (reviews == 1) {
-          nextInterval = 3.0;
-        } else {
-          nextInterval = intervalDays * easeFactor;
-        }
-        nextReviews++;
-      case ReviewRating.easy:
-        if (reviews == 0) {
-          nextInterval = 3.0;
-        } else if (reviews == 1) {
-          nextInterval = 7.0;
-        } else {
-          nextInterval = intervalDays * easeFactor * 1.3;
-        }
-        nextReviews++;
-        nextEase = (easeFactor + 0.15) > 3.0 ? 3.0 : (easeFactor + 0.15);
-    }
-
-    final nextDue = rating == ReviewRating.again
-        ? stamp.add(const Duration(minutes: 10))
-        : stamp.add(Duration(hours: (nextInterval * 24).round()));
+    final stamp = (now ?? DateTime.now()).toUtc();
+    final before = _migrateToFsrsCard(stamp);
+    final result = _scheduler.reviewCard(
+      before,
+      rating.toFsrs,
+      reviewDateTime: stamp,
+    );
+    final next = result.card;
+    final due = next.due.toLocal();
+    // FSRS 会把 lastReview 覆写为本次 stamp，所以 `due - lastReview`
+    // 恰好就是本次算出的新间隔（天）。
+    final intervalDays = next.lastReview == null
+        ? 0.0
+        : due.difference(next.lastReview!.toLocal()).inMinutes / (24 * 60);
+    // FSRS 的"遗忘"定义：从 Review 状态掉到 Relearning（state 2 → 3）。
+    // 只在本次评级真的触发迁移时 +1，防止连点 Again 或 Good 误计。
+    final lapsed = before.state == fsrs.State.review &&
+        next.state == fsrs.State.relearning;
 
     return VocabularySrs(
-      dueAt: nextDue,
-      reviews: nextReviews,
-      intervalDays: nextInterval,
-      easeFactor: nextEase,
-      lapses: nextLapses,
-      lastReviewedAt: stamp,
+      dueAt: due,
+      reviews: reviews + 1,
+      intervalDays: intervalDays < 0 ? 0.0 : intervalDays,
+      easeFactor: _mapDifficultyToEase(next.difficulty),
+      lapses: lapsed ? lapses + 1 : lapses,
+      lastReviewedAt: stamp.toLocal(),
+      fsrsState: next.toMap(),
     );
+  }
+
+  /// 把（可能是旧 SM-2 的）状态迁移成一张 FSRS 卡片。
+  ///
+  /// * 已有 FSRS 状态 → 直接还原；
+  /// * 从未复习过 → 全新 Learning 卡，`due = stamp`（当场可复习）；
+  /// * 旧 SM-2 已复习过 → 用 `intervalDays` 反推 stability、用 `easeFactor`
+  ///   反推 difficulty，并保留 `lastReviewedAt` 作为 `lastReview`，
+  ///   FSRS 会据此算出真实的 `elapsedDays`（平滑接续）。
+  fsrs.Card _migrateToFsrsCard(DateTime stamp) {
+    if (fsrsState != null) {
+      return fsrs.Card.fromMap(Map<String, dynamic>.from(fsrsState!));
+    }
+    if (lastReviewedAt == null) {
+      return fsrs.Card(cardId: _cardId(stamp), due: stamp);
+    }
+    final hasHistory = intervalDays > 0;
+    return fsrs.Card(
+      cardId: _cardId(stamp),
+      state: hasHistory ? fsrs.State.review : fsrs.State.learning,
+      step: hasHistory ? null : 0,
+      // FSRS 的 `_nextInterval` 公式里 `_factor × (retention^(1/decay) − 1) ≈ 1`，
+      // 所以 `nextIntervalDays ≈ stability`。旧 SM-2 的 `intervalDays` 可直接
+      // 当作等效 stability（近似，FSRS 会在首次 review 时按真实 elapsedDays 自愈）。
+      stability: hasHistory ? intervalDays : null,
+      difficulty: hasHistory ? _mapEaseToDifficulty(easeFactor) : null,
+      due: dueAt.toUtc(),
+      lastReview: lastReviewedAt?.toUtc(),
+    );
+  }
+
+  /// 稳定的卡片 id：优先用 FSRS 状态里的，否则从复习时间派生。
+  int _cardId(DateTime stamp) {
+    if (fsrsState != null) return (fsrsState!['cardId'] as num?)?.toInt() ?? 0;
+    return (dueAt.millisecondsSinceEpoch ~/ 1000) ^
+        (lastReviewedAt?.millisecondsSinceEpoch ?? 0);
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -347,19 +393,48 @@ class VocabularySrs {
     'easeFactor': easeFactor,
     'lapses': lapses,
     'lastReviewedAt': lastReviewedAt?.toIso8601String(),
+    'fsrsState': fsrsState,
   };
 
-  static VocabularySrs fromJson(Map<String, Object?> json) => VocabularySrs(
-    dueAt:
-        DateTime.tryParse((json['dueAt'] ?? '') as String) ?? DateTime.now(),
-    reviews: (json['reviews'] as num?)?.toInt() ?? 0,
-    intervalDays: (json['intervalDays'] as num?)?.toDouble() ?? 0,
-    easeFactor: (json['easeFactor'] as num?)?.toDouble() ?? 2.5,
-    lapses: (json['lapses'] as num?)?.toInt() ?? 0,
-    lastReviewedAt: DateTime.tryParse(
-      (json['lastReviewedAt'] ?? '') as String? ?? '',
-    ),
+  static VocabularySrs fromJson(Map<String, Object?> json) {
+    final rawFsrs = json['fsrsState'];
+    return VocabularySrs(
+      dueAt:
+          DateTime.tryParse((json['dueAt'] ?? '') as String) ?? DateTime.now(),
+      reviews: (json['reviews'] as num?)?.toInt() ?? 0,
+      intervalDays: (json['intervalDays'] as num?)?.toDouble() ?? 0,
+      easeFactor: (json['easeFactor'] as num?)?.toDouble() ?? 2.5,
+      lapses: (json['lapses'] as num?)?.toInt() ?? 0,
+      lastReviewedAt: DateTime.tryParse(
+        (json['lastReviewedAt'] ?? '') as String? ?? '',
+      ),
+      fsrsState: rawFsrs is Map
+          ? rawFsrs.cast<String, Object?>()
+          : null,
+    );
+  }
+
+  /// 复用的 FSRS 调度器：学习步骤与 relearning 都用 10 分钟
+  /// （与旧实现 Again 10 分钟一致），关掉 fuzz 让间隔可预期、可测试。
+  static final fsrs.Scheduler _scheduler = fsrs.Scheduler(
+    learningSteps: const <Duration>[Duration(minutes: 10)],
+    relearningSteps: const <Duration>[Duration(minutes: 10)],
+    enableFuzzing: false,
   );
+
+  /// FSRS `difficulty ∈ [1,10]` → SM-2 `ease ∈ [1.3, 3.0]`。
+  static double _mapDifficultyToEase(double? difficulty) {
+    if (difficulty == null) return 2.5;
+    final clamped = difficulty.clamp(1.0, 10.0);
+    // difficulty 1.0 → ease 3.0（易）；difficulty 10.0 → ease 1.3（难）
+    return 3.0 - (clamped - 1.0) / 9.0 * 1.7;
+  }
+
+  /// SM-2 `ease ∈ [1.3, 3.0]` → FSRS `difficulty ∈ [1,10]`（迁移用，逆映射）。
+  static double _mapEaseToDifficulty(double ease) {
+    final clamped = ease.clamp(1.3, 3.0);
+    return 1.0 + (3.0 - clamped) / 1.7 * 9.0;
+  }
 }
 
 /// 一次学习组件的执行记录 —— **Item 级**，不是上下文证据。

@@ -44,6 +44,9 @@ class InMemoryLessonRepository implements LessonRepository {
   }
 
   @override
+  Future<List<Sentence>?> getAlternateSentences(String lessonId) async => null;
+
+  @override
   Future<void> saveProgress({
     required String lessonId,
     required int lastSentenceIndex,
@@ -74,6 +77,7 @@ class InMemoryLessonRepository implements LessonRepository {
       language: package.manifest.language,
       durationMs: package.manifest.durationMs,
       sentenceCount: package.manifest.sentenceCount,
+      series: package.manifest.series,
       audioPath: 'memory://$id/${package.audioFileName}',
       importedAt: DateTime.now(),
     );
@@ -88,5 +92,41 @@ class InMemoryLessonRepository implements LessonRepository {
     _lessons.remove(lessonId);
     _sentences.remove(lessonId);
     _progress.remove(lessonId);
+  }
+
+  @override
+  Future<void> deleteMediaPreservingProgress(String lessonId) async {
+    final lesson = _lessons[lessonId];
+    if (lesson != null) {
+      _lessons[lessonId] = Lesson(
+        id: lesson.id,
+        title: lesson.title,
+        language: lesson.language,
+        durationMs: lesson.durationMs,
+        sentenceCount: lesson.sentenceCount,
+        audioPath: '',
+        coverPath: null,
+        video: lesson.video,
+        series: lesson.series,
+        importedAt: lesson.importedAt,
+      );
+    }
+  }
+
+  @override
+  Future<int> deleteLessons(List<String> lessonIds, {bool preserveProgress = true}) async {
+    for (final id in lessonIds) {
+      _lessons.remove(id);
+      _sentences.remove(id);
+      if (!preserveProgress) {
+        _progress.remove(id);
+      }
+    }
+    return lessonIds.length;
+  }
+
+  @override
+  Future<Map<String, GradeStorageStats>> getLessonsStorageStats() async {
+    return const {};
   }
 }

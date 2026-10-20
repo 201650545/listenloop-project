@@ -27,9 +27,9 @@ import '../widgets/anki/anki_review_dialog.dart';
 import '../widgets/listening_top_bar.dart';
 import '../widgets/ll_audio_control_bar.dart';
 import '../widgets/ll_backdrop.dart';
+import '../widgets/ll_icons.dart';
 import '../widgets/ll_pill_button.dart';
 import '../widgets/ll_read_along_sheet.dart';
-import '../widgets/media_area.dart';
 import '../widgets/playback_controls.dart';
 import '../widgets/sentence_display.dart';
 import '../widgets/sentence_page_list.dart';
@@ -76,7 +76,15 @@ class ListeningScreen extends StatefulWidget {
     this.readAlongSessionFactory,
     this.readAlongRecorderFactory,
     this.readAlongSpeakerFactory,
+    this.onReadAlongChanged,
+    this.onRequestReadAlongTab,
   });
+
+  /// 请求切到底栏的独立跟读一级 Tab（告别弹出式 / Overlay）
+  final VoidCallback? onRequestReadAlongTab;
+
+  /// 当跟读模式状态变化（开启/退出）时通知宿主 Shell
+  final ValueChanged<bool>? onReadAlongChanged;
 
   /// WP-H 跟读验收的测试 seam。默认 null = 生产构造（record 包 + sherpa
   /// 中文朗读档）；widget 测试注入假会话/假录音器/假播报器，把「读完停 →
@@ -476,9 +484,29 @@ class ListeningScreenState extends State<ListeningScreen>
   String _readAlongExpectedText(Sentence sentence) =>
       _isChinese ? sentence.chinese : sentence.english;
 
-  /// 顶栏跟读入口：真开关（WP-H）。开 = 装句末门 + 建会话/录音器 + 浮层面板；
-  /// 再点 = 全拆，恢复原播放行为（门清 null 即复原）。
-  void _toggleReadAlong() {
+  bool get isReadAlongOn => _readAlongOn;
+
+  void enterReadAlong() {
+    if (!_readAlongOn) {
+      _enterReadAlong();
+    }
+  }
+
+  void exitReadAlong() {
+    if (_readAlongOn) {
+      unawaited(_exitReadAlong());
+    }
+  }
+
+  /// 跟读入口（WP-H）。2026-10-20 郭老师：顶栏那枚「跟读验收」图标已撤
+  /// ——跟读验收已升为底部一级页（读 tab），顶栏再摆一枚是重复入口。
+  /// 切换动作改由 [onRequestReadAlongTab] 回调交给一级页处理；没有回调
+  /// 时（单测/独立使用）退回到本屏自己开合跟读。
+  void toggleReadAlong() {
+    if (widget.onRequestReadAlongTab != null) {
+      widget.onRequestReadAlongTab!();
+      return;
+    }
     if (_readAlongOn) {
       unawaited(_exitReadAlong());
     } else {
@@ -508,6 +536,7 @@ class ListeningScreenState extends State<ListeningScreen>
     // 初读（呼吸节拍）要过关，熟读（长意群）照给分但不卡进度。
     session.setLenient(_isAlternateMode);
     setState(() => _readAlongOn = true);
+    widget.onReadAlongChanged?.call(true);
     _installReadAlongGate();
     _showReadAlongPanel();
     if (!_controller.isPlaying) {
@@ -542,6 +571,7 @@ class ListeningScreenState extends State<ListeningScreen>
     _readAlongOverlay?.remove();
     _readAlongOverlay = null;
     if (mounted) setState(() => _readAlongOn = false);
+    widget.onReadAlongChanged?.call(false);
 
     // 硬件层后拆：录音器/会话的销毁抛错或挂住只记录，不阻断 UI。
     final recorder = _readAlongRecorder;
@@ -711,7 +741,6 @@ class ListeningScreenState extends State<ListeningScreen>
 
   late String _currentLessonId = widget.lessonId ?? 'demo';
   late String _currentTitle = widget.title ?? '精听课程';
-  late String? _currentCoverPath = widget.coverPath;
 
   /// 二年级上册（或当前课包）的单元层级树（支持 8 个单元下滑栏 + 语文园地下滑栏）
   List<PrimaryChineseLesson> _curriculumUnits = const [];
@@ -832,7 +861,6 @@ class ListeningScreenState extends State<ListeningScreen>
   Future<void> _switchLesson({
     required String lessonId,
     required String title,
-    String? coverPath,
   }) async {
     if (widget.repository == null) return;
     if (_currentLessonId == lessonId) return;
@@ -866,7 +894,6 @@ class ListeningScreenState extends State<ListeningScreen>
     setState(() {
       _currentLessonId = lessonId;
       _currentTitle = title;
-      _currentCoverPath = coverPath ?? data.lesson.coverPath ?? _currentCoverPath;
       _primarySentences = newSentences;
       _alternateSentences = alt;
       _isAlternateMode = false;
@@ -905,6 +932,30 @@ class ListeningScreenState extends State<ListeningScreen>
     for (final item in _curriculumUnits) {
       unitMap.putIfAbsent(item.unit, () => []).add(item);
     }
+
+    // 2026-10-20 郭老师（自动定位）：每个单元一枚 key + 当前单元序号。
+    // 打开目录时：当前单元自动展开，列表自动滚到它眼前，标题栏直接写明
+    // 「当前：第 N 单元」。语文园地二级栏**不自动展开**。
+    final unitKeys = List.generate(unitMap.length, (_) => GlobalKey());
+    final unitNames = unitMap.keys.toList(growable: false);
+    var currentUnitIndex = -1;
+    for (var i = 0; i < unitNames.length; i++) {
+      final items = unitMap[unitNames[i]] ?? [];
+      final hit = items.any((it) {
+        if (it.lessonId == _currentLessonId) return true;
+        return it.subLessons.any((sub) => sub.lessonId == _currentLessonId);
+      });
+      if (hit) {
+        currentUnitIndex = i;
+        break;
+      }
+    }
+    // 粗定位：每个收起单元的头条约 58dp。先按估算滚过去，目标单元多半
+    // 已经在构建范围内，随后的 ensureVisible 再精确落位。
+    final initialOffset = currentUnitIndex <= 0
+        ? 0.0
+        : (currentUnitIndex * 58.0).toDouble();
+    final sheetScroll = ScrollController(initialScrollOffset: initialOffset);
 
     showModalBottomSheet<void>(
       context: context,
@@ -978,11 +1029,45 @@ class ListeningScreenState extends State<ListeningScreen>
                     ],
                   ),
                 ),
+                // 2026-10-20 郭老师（自动定位）：标题栏直接写明"现在在听第几
+                // 单元"，不必自己数。
+                if (currentUnitIndex >= 0)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.my_location_rounded,
+                          size: 14,
+                          color: ll.accent,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '当前：第 ${currentUnitIndex + 1} 单元 · '
+                            '${unitNames[currentUnitIndex]}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: ll.accent,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 Divider(color: ll.divider, height: 1),
 
-                // 8 个单元的下滑栏 (一级 ExpansionTile，默认收起)
+                // 8 个单元的下滑栏（一级 ExpansionTile）。
+                //
+                // 2026-10-20 郭老师（自动定位）：当前正在听的单元**自动展开**，
+                // 打开目录就直接滚到它眼前；「语文园地」二级栏保持收起
+                // （它下面挂着 4~5 个子栏目，展开会把整屏撑成目录墙）。
                 Expanded(
                   child: ListView.builder(
+                    controller: sheetScroll,
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     itemCount: unitMap.length,
                     itemBuilder: (_, uIdx) {
@@ -996,6 +1081,7 @@ class ListeningScreenState extends State<ListeningScreen>
                       });
 
                       return Container(
+                        key: unitKeys[uIdx],
                         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
                         decoration: BoxDecoration(
                           color: ll.surface,
@@ -1014,8 +1100,11 @@ class ListeningScreenState extends State<ListeningScreen>
                           child: Material(
                             color: Colors.transparent,
                             child: ExpansionTile(
-                            // 默认收起 (initiallyExpanded: false)
-                            initiallyExpanded: false,
+                            // 2026-10-20 郭老师（自动定位）：当前正在听的
+                            // 单元**自动展开**，其余单元仍收起。
+                            // 「语文园地」那一层（二级 ExpansionTile）保持
+                            // 收起——它下面 4~5 个子栏目全展开就没有课文了。
+                            initiallyExpanded: unitHasCurrent,
                             tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
                             childrenPadding: EdgeInsets.zero,
                             leading: Container(
@@ -1260,7 +1349,25 @@ class ListeningScreenState extends State<ListeningScreen>
           ),
         );
       },
-    );
+    ).whenComplete(() {
+      sheetScroll.dispose();
+    });
+
+    // 2026-10-20 郭老师（自动定位）：弹层入场后把当前单元精确滚到视口
+    // 上部——前面的 initialScrollOffset 只是粗定位，这一手才是落位。
+    if (currentUnitIndex >= 0) {
+      Future<void>.delayed(const Duration(milliseconds: 320), () {
+        if (!context.mounted) return;
+        final target = unitKeys[currentUnitIndex].currentContext;
+        if (target == null) return;
+        Scrollable.ensureVisible(
+          target,
+          alignment: 0.12,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+        );
+      });
+    }
   }
 
   void _toggleSegmentationMode() {
@@ -1837,80 +1944,27 @@ class ListeningScreenState extends State<ListeningScreen>
                         ),
                       if (_alternateSentences != null) ...[
                         const SizedBox(width: 4),
-                        Container(
-                          key: const Key('segmentation-mode-toggle'),
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            color: ll.surfaceHigh,
-                            borderRadius: BorderRadius.circular(LLRadius.large),
-                            border: Border.all(
-                              color: ll.divider,
-                              width: 0.8,
+                        // 2026-10-20 郭老师：初读/熟读**图标化**——去掉"读"字，
+                        // 只留「初」「熟」两枚圆钮。原因：顶栏中栏是"02 / 69"
+                        // 句数，左右两槽必须配重，「初读|熟读」四个字的药丸
+                        // 太宽（124dp），把中栏挤到换行。两个字 = 2×28dp。
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _SegmentationDot(
+                              key: const Key('segmentation-mode-chudu'),
+                              glyph: '初',
+                              active: !_isAlternateMode,
+                              onTap: _isAlternateMode ? _toggleSegmentationMode : null,
                             ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              GestureDetector(
-                                key: const Key('segmentation-mode-chudu'),
-                                onTap: _isAlternateMode ? _toggleSegmentationMode : null,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: !_isAlternateMode
-                                        ? ll.textPrimary.withValues(alpha: 0.12)
-                                        : Colors.transparent,
-                                    borderRadius:
-                                        BorderRadius.circular(LLRadius.medium),
-                                  ),
-                                  child: Text(
-                                    '初读',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: !_isAlternateMode
-                                          ? FontWeight.w700
-                                          : FontWeight.w400,
-                                      color: !_isAlternateMode
-                                          ? ll.textPrimary
-                                          : ll.textSecondary,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              GestureDetector(
-                                key: const Key('segmentation-mode-shudu'),
-                                onTap: !_isAlternateMode ? _toggleSegmentationMode : null,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _isAlternateMode
-                                        ? ll.textPrimary.withValues(alpha: 0.12)
-                                        : Colors.transparent,
-                                    borderRadius:
-                                        BorderRadius.circular(LLRadius.medium),
-                                  ),
-                                  child: Text(
-                                    '熟读',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: _isAlternateMode
-                                          ? FontWeight.w700
-                                          : FontWeight.w400,
-                                      color: _isAlternateMode
-                                          ? ll.textPrimary
-                                          : ll.textSecondary,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                            const SizedBox(width: 4),
+                            _SegmentationDot(
+                              key: const Key('segmentation-mode-shudu'),
+                              glyph: '熟',
+                              active: _isAlternateMode,
+                              onTap: !_isAlternateMode ? _toggleSegmentationMode : null,
+                            ),
+                          ],
                         ),
                       ],
                     ],
@@ -1927,30 +1981,31 @@ class ListeningScreenState extends State<ListeningScreen>
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (_isChinese)
-                        // WP-H：跟读验收入口——真开关。中文课时左槽是
-                        // 「初读|熟读」分段器（~124dp），右槽原先只有一个
-                        // 视图切换图标（48dp），计数器虽真居中、但两侧
-                        // 配重不等。这一枚补上后右槽 2×48=96dp，与左槽
-                        // 同一量级，配重成立。
-                        //
-                        // 英文课时右槽已是 3 枚（听写/more/视图）顶满 144，
-                        // 再加会挤爆 360dp 窄屏的中栏计数器，故只在中文
-                        // 课时出现（方案 §六.4 边界）。
-                        //
-                        // 开着 = 句末停住等孩子跟读、录完判分、过关进
-                        // 下一句/不过原声重读；再点一次退出并复原播放行为。
+                      if (_isChinese && controller.hasVideoSource)
+                        // 2026-10-20 郭老师：「试听」不再是一行「听读|视听」
+                        // 的文字切换，改成顶栏一枚**视频播放标志**：点一下就
+                        // 进视频（视听页保留），视频态下同一枚钮变成「退出
+                        // 视频」回到听读。没有原片的课不摆这枚钮——绝不摆
+                        // 点了没反应的死按钮。
                         IconButton(
-                          key: const Key('read-along-button'),
-                          tooltip: _readAlongOn ? '退出跟读验收' : '跟读验收',
+                          key: const Key('video-button'),
+                          tooltip: controller.playbackMode == PlaybackMode.video
+                              ? '退出视频'
+                              : '看视频',
                           icon: Icon(
-                            _readAlongOn
-                                ? Icons.record_voice_over_rounded
-                                : Icons.record_voice_over_outlined,
-                            size: 20,
+                            controller.playbackMode == PlaybackMode.video
+                                ? Icons.close_fullscreen_rounded
+                                : Icons.play_circle_outline_rounded,
+                            size: 22,
                           ),
-                          color: _readAlongOn ? ll.accent : ll.textSecondary,
-                          onPressed: _toggleReadAlong,
+                          color: ll.textSecondary,
+                          onPressed: () {
+                            _controller.setPlaybackMode(
+                              controller.playbackMode == PlaybackMode.video
+                                  ? PlaybackMode.audio
+                                  : PlaybackMode.video,
+                            );
+                          },
                         ),
                       if (!_isChinese) ...[
                         // 核心层 P1：听写入口。刻意放在一级页顶栏 —— 听写属于
@@ -2012,14 +2067,14 @@ class ListeningScreenState extends State<ListeningScreen>
                     ],
                   ),
                 ),
-                // 矮视口下音频模式不再给封面留位：这段高度归课文句子。
+                // 2026-10-20 郭老师：删掉听读页的封面。音频模式不再保留媒体区
+                // （原来那块是"封面 + ∞ 标记"，纯标识，却吃掉近 1/4 竖屏，
+                // 把课文句子挤到下面）；现在这段高度整块归课文句子。
                 // 视频模式必须保留 —— 那时媒体区就是内容本身。
-                if (!shortViewport ||
-                    controller.playbackMode == PlaybackMode.video)
+                if (controller.playbackMode == PlaybackMode.video)
                 Expanded(
-                  // Follow-up: video mode gets a taller stage; audio keeps a
-                  // calm, smaller mark.
-                  flex: controller.playbackMode == PlaybackMode.video ? 30 : 22,
+                  // 视频模式给一块更高的舞台；音频模式已无媒体区。
+                  flex: 30,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(
                       LLSpacing.lg,
@@ -2058,21 +2113,11 @@ class ListeningScreenState extends State<ListeningScreen>
                     ),
                   ),
                 ),
-                // AUDIO|VIDEO typography switch — only for lessons that
-                // actually have a video source (spec V2 §二十).
-                //
-                // WP-G 终审修掉的死按钮：条件原先是 `hasVideoSource || _isChinese`，
-                // 但 `Lesson.video` 可空（"Null for audio-only lessons"），而
-                // `primary_chinese_curriculum.dart` 全篇没有 video 字段 —— 统编
-                // 语文课时一律是音频课时。此时 `setPlaybackMode(video)` 因
-                // `_videoFacade == null` 直接 return，那个「视听」选项点了毫无反应，
-                // 正是总纲红线 6 与记忆库「严禁制造无法操作的死按钮」要拦的东西。
-                // 有原片时它照常出现，没有原片时不再摆一个假选项。
-                if (controller.hasVideoSource)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                    child: _modeToggle(context, controller),
-                  ),
+                // 2026-10-20 郭老师：原来这里的「听读 | 视听」文字切换已撤。
+                // 「试听」改成了顶栏那枚视频播放标志（见 video-button）：
+                // 文字切换要占一整行、还要点两次才看得到视频，而一枚 ▶
+                // 一次点击直接进视频页，位置固定在右手第一个。
+                // 没有原片的课不摆那枚钮——绝不摆点了没反应的死按钮。
                 Expanded(
                   flex: 44,
                   child: sentenceChild,
@@ -2295,71 +2340,10 @@ class ListeningScreenState extends State<ListeningScreen>
         loading: showLoading,
       );
     }
-    return MediaArea(coverPath: _currentCoverPath, loading: showLoading);
-  }
-
-  /// AUDIO|VIDEO typography switch (spec V2 §二十): quiet text options,
-  /// the active one white with a short underline — no pill buttons.
-  Widget _modeToggle(
-    BuildContext context,
-    SentencePlayerController controller,
-  ) {
-    final ll = context.ll;
-    final isZh = _isChinese;
-    Widget option(PlaybackMode mode, String label, Key key) {
-      final selected = controller.playbackMode == mode;
-      return GestureDetector(
-        key: key,
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          if (!selected) _controller.setPlaybackMode(mode);
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                width: 2,
-                color: selected ? ll.textPrimary : Colors.transparent,
-              ),
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: isZh ? 14 : 13,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-              letterSpacing: isZh ? 1.0 : 1.5,
-              color: selected ? ll.textPrimary : ll.textTertiary,
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      key: const Key('mode-toggle'),
-      children: [
-        option(
-          PlaybackMode.audio,
-          // WP-G 终审：原为「晨读反复听」5 字 /「视频欣赏」4 字，字数与结构都
-          // 不对称，在顶栏这种极窄的对称位上读起来一长一短。改为等长双字并列
-          // 结构：听读（音频反复听+跟读的闭环，也是本 App 自己的品牌词
-          // 「听读闭环」）｜视听（有原片时的看+听）。刻意不图标化——spec V2 §二十
-          // 定的就是"安静的文字选项 + 选中下划线"，两字中文已经足够紧凑，
-          // 再加图标只会给一个本该安静的控件增加视觉重量。
-          isZh ? '听读' : 'AUDIO',
-          const Key('mode-option-audio'),
-        ),
-        const SizedBox(width: 16),
-        option(
-          PlaybackMode.video,
-          isZh ? '视听' : 'VIDEO',
-          const Key('mode-option-video'),
-        ),
-      ],
-    );
+    // 2026-10-20 郭老师：封面已删，音频模式没有媒体区。这里只在视频模式
+    // 被调用（媒体区 = 视频本身）；真到了没有视频 facade 的异常态，就留空，
+    // 绝不回退到"封面"那张图——那正是这次要删掉的东西。
+    return const SizedBox.shrink();
   }
 
   void _onSpeedLongPressStart(BuildContext context, LongPressStartDetails details) {
@@ -2646,26 +2630,12 @@ class ListeningScreenState extends State<ListeningScreen>
     BuildContext context,
     SentencePlayerController controller,
   ) {
+    final ll = context.ll;
     final lessonLoop = controller.lessonLoop;
-    final loopLabel = _isChinese
-        ? (controller.repeatTarget == 0
-            ? '↻ 一直读'
-            : '↻ ${controller.repeatTarget}遍')
-        : (controller.repeatTarget == 0
-            ? '∞'
-            : 'LOOP ×${controller.repeatTarget}');
+    // 2026-10-20 郭老师：控制条全面图标化——中文标签全部删除，
+    // 数值以小徽标挂在图标上（信息不丢，语言中立）。
     final gapMs = controller.sentenceGapMs;
-    final gapLabel = _isChinese
-        ? (gapMs <= 0
-            ? '◷ 0秒'
-            : '◷ ${(gapMs / 1000).toStringAsFixed(gapMs % 1000 == 0 ? 0 : 1)}秒')
-        : (gapMs <= 0
-            ? '间隔'
-            : '+${(gapMs / 1000).toStringAsFixed(gapMs % 1000 == 0 ? 0 : 1)}s');
     final isSkip = controller.skipSilence;
-    final silenceLabel = _isChinese
-        ? (isSkip ? '≡▶ 逐句' : '▶ 连读')
-        : (isSkip ? '⚡ 跳过空白' : '🎬 原声连贯');
     final lessonId = widget.lessonId ?? 'demo';
     final isAdded = _aiGovernorService.isSentenceInAnki(
       lessonId,
@@ -2674,9 +2644,11 @@ class ListeningScreenState extends State<ListeningScreen>
     return [
       LLPillButton(
         key: const Key('lesson-loop-badge'),
-        label: lessonLoop
-            ? (_isChinese ? '🔁 整课' : 'Lesson')
-            : (_isChinese ? '🔁' : 'Wrap'),
+        label: '',
+        leading: LLLessonLoopIcon(
+          size: 14,
+          color: lessonLoop ? ll.textPrimary : ll.textSecondary,
+        ),
         active: lessonLoop,
         onTap: () {
           final next = !lessonLoop;
@@ -2687,11 +2659,20 @@ class ListeningScreenState extends State<ListeningScreen>
             PreferencesScope.of(context).update(lessonLoop: next),
           );
           setState(() {});
+          // 图标化之后没有文字标签了 → 切换时弹一小段说明，告诉用户这个按钮的区别。
+          _showLessonLoopHint(next);
         },
       ),
       LLPillButton(
         key: const Key('loop-badge'),
-        label: loopLabel,
+        label: '',
+        leading: LLLoopCountIcon(
+          size: 14,
+          color: controller.repeatTarget != 1
+              ? ll.textPrimary
+              : ll.textSecondary,
+          count: controller.repeatTarget == 0 ? null : controller.repeatTarget,
+        ),
         active: controller.repeatTarget != 1,
         onTap: () => _showLoopSheet(context),
         onLongPressStart: (details) => _onLoopLongPressStart(context, details),
@@ -2700,7 +2681,14 @@ class ListeningScreenState extends State<ListeningScreen>
       ),
       LLPillButton(
         key: const Key('gap-badge'),
-        label: gapLabel,
+        label: '',
+        leading: LLLoopGapIcon(
+          size: 14,
+          color: gapMs > 0 ? ll.textPrimary : ll.textSecondary,
+          badge: gapMs <= 0
+              ? null
+              : '${(gapMs / 1000).toStringAsFixed(gapMs % 1000 == 0 ? 0 : 1)}s',
+        ),
         active: gapMs > 0,
         onTap: () => _showGapSheet(context),
         onLongPressStart: (details) => _onGapLongPressStart(context, details),
@@ -2709,7 +2697,16 @@ class ListeningScreenState extends State<ListeningScreen>
       ),
       LLPillButton(
         key: const Key('silence-mode-badge'),
-        label: silenceLabel,
+        leading: isSkip
+            ? LLSentencePauseIcon(
+                size: 13,
+                color: isSkip ? ll.textPrimary : ll.textSecondary,
+              )
+            : LLContinuousPlayIcon(
+                size: 13,
+                color: isSkip ? ll.textPrimary : ll.textSecondary,
+              ),
+        label: '',
         active: isSkip,
         onTap: () => _toggleSilenceMode(controller),
       ),
@@ -2723,27 +2720,107 @@ class ListeningScreenState extends State<ListeningScreen>
     ];
   }
 
-  /// 连读/逐句切换（旧 dock badge 的原行为，含轻提示），从 badge 的
-  /// InkWell 里抽出来给底座胶囊复用——行为一字未改。
+  /// 2026-10-20 郭老师：整课图标化之后没有文字标签了，
+  /// 切换时弹一小段文字，说明这个按钮到底切了什么。
+  void _showLessonLoopHint(bool enabled) {
+    final ll = context.ll;
+    final message = _isChinese
+        ? (enabled
+            ? '整课循环：整本课文播完再从头循环'
+            : '关掉整课循环：播完本课即止，不回头重播')
+        : (enabled
+            ? 'Lesson loop: replay the whole lesson'
+            : 'Lesson loop off: stop at the end');
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        duration: const Duration(milliseconds: 1400),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 140, left: 24, right: 24),
+        padding: EdgeInsets.zero,
+        content: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+            decoration: BoxDecoration(
+              color: (ll.brightness == Brightness.light
+                      ? const Color(0xFF1E1E1E)
+                      : const Color(0xFF2C2C2C))
+                  .withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.12),
+                width: 0.8,
+              ),
+            ),
+            child: Text(
+              message,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 连读/逐句切换（轻量磨砂胶囊浮动提示，精炼文案讲透概念）
   void _toggleSilenceMode(SentencePlayerController controller) {
     setState(() {
       controller.toggleSkipSilence();
     });
     final newMode = controller.skipSilence;
+    final ll = context.ll;
+    final message = newMode
+        ? (_isChinese
+            ? '逐句：每句播完停顿，适合跟读精听'
+            : '逐句精听：句末停顿，适合跟读消化')
+        : (_isChinese
+            ? '连读：整篇原声连贯，不打断节奏'
+            : '原声连读：整篇自然连贯播放');
+
     ScaffoldMessenger.of(context).removeCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          newMode
-              ? (_isChinese
-                  ? '已切换为：≡▶ 逐句精听（跳过句间空白）'
-                  : '已开启：⚡ 紧凑精听（自动跳过中间空白）')
-              : (_isChinese
-                  ? '已切换为：▶ 连读模式（课文原声自然连贯）'
-                  : '已开启：🎬 原声连贯（电影原声自然播放，字幕稳定保持）'),
-        ),
-        duration: const Duration(seconds: 1),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        duration: const Duration(milliseconds: 1400),
         behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 140, left: 24, right: 24),
+        padding: EdgeInsets.zero,
+        content: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+            decoration: BoxDecoration(
+              color: (ll.brightness == Brightness.light
+                      ? const Color(0xFF1E1E1E)
+                      : const Color(0xFF2C2C2C))
+                  .withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.12),
+                width: 0.8,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.16),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -3172,3 +3249,62 @@ class _SentenceScrubber extends StatelessWidget {
       );
     }
   }
+
+/// 初读 / 熟读 的单字圆钮（2026-10-20 郭老师：顶栏分段器图标化）。
+///
+/// 原先是「初读 | 熟读」四个字的药丸，占 124dp，把中栏句数挤到换行；
+/// 现在只剩「初」「熟」两枚 28dp 圆钮——一眼可辨，宽度减半。
+class _SegmentationDot extends StatelessWidget {
+  const _SegmentationDot({
+    super.key,
+    required this.glyph,
+    required this.active,
+    required this.onTap,
+  });
+
+  /// 单字标记：「初」或「熟」。
+  final String glyph;
+
+  /// 当前选中态（选中 = 实心底 + 粗字）。
+  final bool active;
+
+  /// null = 不可点（另一个档位正生效时，点了也不会切）。
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ll = context.ll;
+    return Semantics(
+      button: true,
+      selected: active,
+      label: glyph == '初' ? '初读' : '熟读',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: active
+                ? ll.textPrimary.withValues(alpha: 0.12)
+                : ll.surfaceHigh,
+            border: Border.all(
+              color: active ? ll.textPrimary.withValues(alpha: 0.28) : ll.divider,
+              width: 0.8,
+            ),
+          ),
+          child: Text(
+            glyph,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+              color: active ? ll.textPrimary : ll.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

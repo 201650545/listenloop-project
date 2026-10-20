@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../theme/listenloop_theme.dart';
+import 'll_icons.dart';
 
-/// Discrete speed selector: 0.75× / 1.0× / 1.25×, current value white with
-/// a short underline, the rest tertiary grey (spec V2 §二十七). No slider on
-/// purpose — three choices cover the listening use case (spec V0.1 §14).
-/// Long-pressing the row still opens the continuous 0.5×–2.0× sheet.
+/// The discrete speed affordance under the transport cluster.
+///
+/// 2026-10-20 郭老师：「下面的改倍速功能也不要显示文字，也是图标化」。
+/// 原来是三个并排的文字档位（0.8× / 1.0× / 1.3×），现在收成**一个**
+/// 倍速图标 + 当前数值：
+///   · 图标 = LLSpeedIcon（双快进箭头 + 速度线，与控制条其它图标同一套语言）；
+///   · 数值 = 当前档位读数（读数不是文字标签，倍速必须看得见）；
+///   · 点按 = 在三档之间循环；长按 = 仍开 0.5×–2.0× 连续细调（行为不变）。
 class SpeedSelector extends StatelessWidget {
   const SpeedSelector({
     super.key,
     required this.playbackRate,
     required this.onChanged,
     this.enabled = true,
+    this.onLongPressStart,
+    this.onLongPressMoveUpdate,
+    this.onLongPressEnd,
   });
 
   static const List<double> rates = [0.75, 1.0, 1.25];
@@ -19,6 +27,9 @@ class SpeedSelector extends StatelessWidget {
   final double playbackRate;
   final ValueChanged<double> onChanged;
   final bool enabled;
+  final GestureLongPressStartCallback? onLongPressStart;
+  final GestureLongPressMoveUpdateCallback? onLongPressMoveUpdate;
+  final GestureLongPressEndCallback? onLongPressEnd;
 
   String _label(double rate) =>
       rate == rate.roundToDouble() ? '${rate.toStringAsFixed(1)}×' : '$rate×';
@@ -26,66 +37,30 @@ class SpeedSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        for (final rate in rates)
-          _RateOption(
-            label: _label(rate),
-            selected: rate == playbackRate,
-            enabled: enabled,
-            onTap: () => onChanged(rate),
-            palette: ll,
-          ),
-      ],
-    );
-  }
-}
-
-class _RateOption extends StatelessWidget {
-  const _RateOption({
-    required this.label,
-    required this.selected,
-    required this.enabled,
-    required this.onTap,
-    required this.palette,
-  });
-
-  final String label;
-  final bool selected;
-  final bool enabled;
-  final VoidCallback onTap;
-  final LLPalette palette;
-
-  @override
-  Widget build(BuildContext context) {
-    final active = selected && enabled;
-    final color = !enabled
-        ? palette.disabled
-        : active
-        ? palette.textPrimary
-        : palette.textTertiary;
+    final idx = rates.indexOf(playbackRate);
+    final next = rates[idx < 0 ? 1 : (idx + 1) % rates.length];
+    final color = enabled ? ll.textSecondary : ll.disabled;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: enabled ? onTap : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              width: 2,
-              color: active ? palette.textPrimary : Colors.transparent,
+      onTap: enabled ? () => onChanged(next) : null,
+      onLongPressStart: enabled ? onLongPressStart : null,
+      onLongPressMoveUpdate: enabled ? onLongPressMoveUpdate : null,
+      onLongPressEnd: enabled ? onLongPressEnd : null,
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LLSpeedIcon(size: 15, color: color),
+            const SizedBox(width: 5),
+            Text(
+              _label(playbackRate),
+              style: TextStyle(
+                fontSize: 12,
+                color: color,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-            color: color,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
+          ],
         ),
       ),
     );

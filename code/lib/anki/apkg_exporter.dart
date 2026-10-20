@@ -12,7 +12,9 @@
 ///
 /// 分层：本文件分两半 ——
 ///   * **纯函数**（schema JSON、guid、csum、字段拼接）可单测；
-///   * `createCollectionDb` 依赖 sqflite 运行时（真机/模拟器），不进单测。
+///   * `createCollectionDb` 依赖 sqflite 运行时（真机/模拟器），
+///     但通过 `factory` 参数可注入 `databaseFactoryFfi` 在 host 上跑同一条
+///     SQL 链路（`test/anki/apkg_collection_db_test.dart`）。
 library;
 
 import 'dart:convert';
@@ -23,6 +25,8 @@ import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+
+import '../models/vocabulary_model.dart' show VocabularyStatus;
 
 // ------------------------------------------------------------------ 数据
 
@@ -51,6 +55,16 @@ class AnkiExportNote {
   /// Audio 字段将写成 `[sound:<audioImportName>]`。
   final String? audioImportName;
 }
+
+/// 判断某个词条是否应该被导出到 Anki（P3 守卫，纯函数可测）。
+///
+/// 口径与生词本页 `_exportApkg` 一致：
+///   * **只有「学习中」和「已掌握」导出** —— 它们才是真正进入 SRS 的卡；
+///   * **候选池不导出** —— 用户只是随手点了一下，还没确认要学，
+///     背进 Anki 等于自己制造复习债（10 号文档 §四的红线）；
+///   * **已忽略不导出** —— 用户明确说"不用管这个词"。
+bool isExportableVocabularyStatus(VocabularyStatus status) =>
+    status == VocabularyStatus.learning || status == VocabularyStatus.known;
 
 // -------------------------------------------------------------- 纯函数区
 
@@ -94,7 +108,7 @@ String buildModelsJson({
       '.hint { color: #888; font-size: 14px; }'
       '.zh { color: #555; }';
   final model =
-      '{"id":$modelId,"name":"ListenLoop Vocabulary","type":0,"mod":$mod,'
+      '{"id":$modelId,"name":"句读 Vocabulary","type":0,"mod":$mod,'
       '"usn":-1,"sortf":0,"did":1,"tmpls":[{"name":"Card 1","ord":0,'
       '"qfmt":"{{Audio}}<br><br>{{Sentence_Cloze}}<br><br><span class=hint>'
       '&#127911; recall the word</span>",'
@@ -119,7 +133,7 @@ String buildDecksJson({required int deckId, required int mod}) {
       '"revToday":[0,0],"newToday":[0,0],"timeToday":[0,0],"collapsed":false,'
       '"browserCollapsed":false,"desc":"","dyn":0,"conf":1,"extendNew":0,'
       '"extendRev":0}';
-  return '{"1":${deck(1, 'Default')},"$deckId":${deck(deckId, 'ListenLoop::Vocabulary')}}';
+  return '{"1":${deck(1, 'Default')},"$deckId":${deck(deckId, '句读::Vocabulary')}}';
 }
 
 /// col.dconf 的 JSON（默认调度配置）。
@@ -198,15 +212,26 @@ List<int> packageApkg({
 /// 在 [dbPath] 生成合法的 `collection.anki2`。
 ///
 /// [newCardPos] 起始的 due 编号让新卡按导入顺序排队。
+///
+/// [factory] 仅测试用：Android 上 `openDatabase` 必须走 sqflite 真机实现
+/// （`databaseFactory`），测试可注入 `databaseFactoryFfi` 在 host 上跑同一条链路。
 Future<void> createCollectionDb({
   required String dbPath,
   required List<AnkiExportNote> notes,
   required DateTime now,
   required Random rng,
+  DatabaseFactory? factory,
 }) async {
-  final db = await openDatabase(dbPath, version: 1);
+  final db = await (factory ?? databaseFactory).openDatabase(
+    dbPath,
+    options: OpenDatabaseOptions(version: 1),
+  );
   try {
-    await db.execute('PRAGMA journal_mode=DELETE');
+    // Android 的 sqflite 只允许通过 query/rawQuery 执行返回行的 PRAGMA，
+    // 走 execute() 会抛 "Queries can be performed using SQLiteDatabase query
+    // or rawQuery methods only."。必须用 rawQuery。
+    // 目的：强制 DELETE 日志模式，让 collection.anki2 单文件自包含（不带 -wal/-shm）。
+    await db.rawQuery('PRAGMA journal_mode=DELETE');
     for (final sql in ankiSchemaSql) {
       await db.execute(sql);
     }

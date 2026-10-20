@@ -9,6 +9,7 @@ import '../models/vocabulary_model.dart';
 import '../player/audio_player_facade.dart';
 import '../player/just_audio_facade.dart';
 import '../theme/listenloop_theme.dart';
+import '../widgets/ll_page.dart';
 import '../training/vocabulary_ai_drill.dart';
 import '../training/vocabulary_drill.dart';
 import '../training/vocabulary_plan.dart';
@@ -213,64 +214,57 @@ class _VocabularyDrillScreenState extends State<VocabularyDrillScreen> {
     final ll = context.ll;
     final s = LLStrings.of(context);
 
-    return Scaffold(
-      backgroundColor: ll.bg,
-      appBar: AppBar(
-        backgroundColor: ll.bg,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: BackButton(color: ll.textPrimary),
-        titleSpacing: 0,
-        title: ListenableBuilder(
-          listenable: widget.store,
-          builder: (context, _) => Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _item?.surfaceForm ?? s.drillTitle,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: ll.textPrimary,
-                ),
+    return LLPage(
+      leading: BackButton(color: ll.textPrimary),
+      title: ListenableBuilder(
+        listenable: widget.store,
+        builder: (context, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              _item?.surfaceForm ?? s.drillTitle,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: ll.textPrimary,
               ),
-              if (_steps.length > 1)
-                Text(
-                  s.drillProgress(_step + 1, _steps.length),
-                  style: TextStyle(fontSize: 11, color: ll.textTertiary),
-                ),
-            ],
-          ),
+            ),
+            if (_steps.length > 1)
+              Text(
+                s.drillProgress(_step + 1, _steps.length),
+                style: TextStyle(fontSize: 11, color: ll.textTertiary),
+              ),
+          ],
         ),
       ),
       body: ListenableBuilder(
-        listenable: widget.store,
-        builder: (context, _) {
-          final item = _item;
-          if (item == null) {
-            return Center(
-              child: Text(
-                s.drillNoSteps,
-                style: TextStyle(fontSize: 13, color: ll.textTertiary),
-              ),
-            );
-          }
-          final component = _current;
-          if (component == null) {
-            return Center(
-              child: Text(
-                s.drillNoSteps,
-                style: TextStyle(fontSize: 13, color: ll.textTertiary),
-              ),
-            );
-          }
-          return SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
-            child: _buildStep(context, s, ll, item, component),
+      listenable: widget.store,
+      builder: (context, _) {
+        final item = _item;
+        if (item == null) {
+          return Center(
+            child: Text(
+              s.drillNoSteps,
+              style: TextStyle(fontSize: 13, color: ll.textTertiary),
+            ),
           );
-        },
-      ),
+        }
+        final component = _current;
+        if (component == null) {
+          return Center(
+            child: Text(
+              s.drillNoSteps,
+              style: TextStyle(fontSize: 13, color: ll.textTertiary),
+            ),
+          );
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+          child: _buildStep(context, s, ll, item, component),
+        );
+      },
+    )
     );
   }
 

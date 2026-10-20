@@ -1,11 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart' show getDatabasesPath;
 
 import '../creation/audio_preprocessor.dart';
+import '../widgets/ll_icons.dart';
 import '../creation/creation_controller.dart';
 import '../creation/creation_screen.dart';
 import '../creation/sherpa_onnx_asr_engine.dart';
@@ -15,12 +16,18 @@ import '../l10n/ll_strings.dart';
 import '../models/lesson.dart';
 import '../models/sentence.dart';
 import '../data/vocabulary_store.dart';
+import '../data/word_frequency_loader.dart';
 import '../player/audio_player_facade.dart';
+import '../player/just_audio_facade.dart';
 import '../player/sentence_player_controller.dart';
 import '../preferences/app_preferences.dart';
 import '../storage/lesson_repository.dart';
+import '../sync/export_payload.dart' show ExportProgressRecord;
+import '../sync/local_snapshot.dart';
 import '../theme/listenloop_theme.dart';
 import '../widgets/ll_brand.dart';
+import '../widgets/ll_page.dart';
+import 'chinese_reading_screen.dart';
 import 'library_screen.dart';
 import 'listening_screen.dart';
 import 'settings_screen.dart';
@@ -104,7 +111,10 @@ class RootShell extends StatefulWidget {
 }
 
 class RootShellState extends State<RootShell> {
-  int _index = 0;
+  // 底部导航栏四分位：0: 课程, 1: 听, 2: 跟读, 3: 设置
+  int _bottomIndex = 0;
+
+  int get _stackIndex => _bottomIndex;
 
   /// Directly opens a lesson in the Listen tab and starts playback.
   Future<void> openLessonDirectly(Lesson lesson) async {
@@ -116,10 +126,19 @@ class RootShellState extends State<RootShell> {
       switchTab: true,
     );
   }
+  /// 切换档案后刷新课程库（2026-10-20 离线登录）。
+  ///
+  /// 进度是按档案存的：换档案 = 换一份"读到第几句"。课程页必须重新拉
+  /// 一次，否则还摆着上一个孩子的进度。
+  Future<void> reloadForProfileSwitch() async {
+    await _libraryKey.currentState?.reload();
+  }
+
   ActiveLessonSession? _session;
   bool _autoLoadStarted = false;
   final GlobalKey<LibraryScreenState> _libraryKey = GlobalKey();
   final GlobalKey<_ListenTabState> _listenTabKey = GlobalKey();
+  final GlobalKey<_ReadAlongTabState> _readAlongTabKey = GlobalKey();
 
   /// Read in [didChangeDependencies]; the translation engine looks through it
   /// on every call so a Settings change applies to the next job immediately.
@@ -143,10 +162,7 @@ class RootShellState extends State<RootShell> {
         repository: widget.repository,
         audioPreprocessor: MethodChannelAudioPreprocessor(),
         asrEngine: SherpaOnnxAsrEngine(
-          modelDirResolver: () async {
-            final docs = await getApplicationDocumentsDirectory();
-            return p.join(docs.path, 'models', 'asr');
-          },
+          modelDirResolver: defaultAsrModelDir,
           tier: () => _preferences?.prefs.asrTier ?? AsrTier.fast,
           threads: () => _preferences?.prefs.asrThreads ?? kDefaultAsrThreads,
         ),
@@ -172,7 +188,77 @@ class RootShellState extends State<RootShell> {
     if (widget.vocabularyStore == null) {
       unawaited(_vocabularyStore.load());
     }
+    // 词频表（§20.4 P0）：启动装载一次，失败静默降级为空表。
+    // 词频只影响候选池排序，绝不能阻塞生词本主链路。
+    unawaited(WordFrequencyHolder.load());
+    // L1 本地留存：每天最多一次启动快照，防止换机/误删丢 FSRS 曲线。
+    // 全部静默失败（L1 是锦上添花，失败绝不阻塞启动）。
+    unawaited(_maybeDailySnapshot());
     _autoLoadMostRecent();
+  }
+
+  /// L1 本地快照：**每天最多一次**，靠 SharedPreferences 记 last date。
+  /// 快照覆盖生词本（含 FSRS）+ 偏好 + SQLite 备份；governor 数据
+  /// 留给 L2 用户主动导出（启动时 governor 尚未创建）。
+  Future<void> _maybeDailySnapshot() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final today = DateTime.now();
+      final todayKey =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+      if (prefs.getString('listenloop:last_snapshot_date') == todayKey) {
+        return; // 今天已快照过
+      }
+
+      final manager = LocalSnapshotManager();
+      final store = _vocabularyStore;
+      final appPrefs = _preferences?.prefs ?? AppPreferences.defaults;
+      final progress = await _collectProgress();
+
+      await manager.takeSnapshot(
+        store: store,
+        governor: null,
+        prefs: appPrefs,
+        progress: progress,
+      );
+      // 顺带备份 SQLite（若可访问）。
+      try {
+        await manager.backupSqlite(
+          dbPath: p.join(await getDatabasesPath(), 'listenloop.db'),
+        );
+      } catch (_) {}
+
+      await prefs.setString('listenloop:last_snapshot_date', todayKey);
+    } catch (e) {
+      debugPrint('[ListenLoop] daily snapshot skipped: $e');
+    }
+  }
+
+  /// 收集各课程进度（供快照保存）。失败时返回空列表。
+  Future<List<ExportProgressRecord>> _collectProgress() async {
+    try {
+      final items = await widget.repository.listLessons();
+      final out = <ExportProgressRecord>[];
+      for (final item in items) {
+        final progress = item.progress;
+        if (progress == null) continue;
+        out.add(
+          ExportProgressRecord(
+            lessonId: item.lesson.id,
+            lastSentenceIndex: progress.lastSentenceIndex,
+            positionMs: progress.positionMs,
+            subtitleMode: progress.subtitleMode,
+            playbackRate: progress.playbackRate,
+            repeatTarget: progress.repeatTarget,
+            displayMode: progress.displayMode,
+            updatedAt: progress.updatedAt,
+          ),
+        );
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// §四: Listen always has the most recent lesson ready — restored to its
@@ -215,85 +301,114 @@ class RootShellState extends State<RootShell> {
         startSentenceIndex: startSentenceIndex,
         seq: ++_sessionSeq,
       );
-      if (switchTab) _index = 1;
+      if (switchTab) _bottomIndex = 1;
     });
   }
 
   void _onTabChanged(int index) {
-    if (index == _index) return;
-    setState(() => _index = index);
-    // Tab 3: Settings is for adjusting, not listening — pause on the way in.
+    if (index == _bottomIndex) return;
+    setState(() => _bottomIndex = index);
+
     if (index == 3) {
+      // Tab 3: 设置 —— 暂停播放
       _listenTabKey.currentState?.pausePlayback();
+      _readAlongTabKey.currentState?.onLeave();
     } else if (index == 1) {
-      // Tab 1: reveal the current sentence now that this tab becomes visible.
+      // Tab 1: 听 —— 暂停跟读收音，回到精听播放
+      _readAlongTabKey.currentState?.onLeave();
       _listenTabKey.currentState?.revealCurrentSentence();
+    } else if (index == 2) {
+      // Tab 2: 跟读 —— 暂停精听播放
+      _listenTabKey.currentState?.pausePlayback();
     } else if (index == 0) {
-      // Tab 0: refresh library so newly completed lessons show up immediately.
+      // Tab 0: 课程 —— 刷新课程库
+      _listenTabKey.currentState?.pausePlayback();
+      _readAlongTabKey.currentState?.onLeave();
       _libraryKey.currentState?.reload();
     }
+  }
+
+  Future<void> _openCreationRoute() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => CreationScreen(
+          controller: _creationController,
+          embedded: true,
+          onStartListening: (lesson) async {
+            Navigator.of(context).pop();
+            final data = await widget.repository.getLessonWithSentences(
+              lesson.id,
+            );
+            if (!mounted || data == null) return;
+            await _openLesson(
+              LessonWithProgress(lesson: lesson),
+              autoPlay: true,
+              switchTab: true,
+            );
+          },
+          onImportLessonPackage: () {
+            Navigator.of(context).pop();
+            _libraryKey.currentState?.importLessonPackage();
+          },
+          onOpenCloudCatalog: () {
+            Navigator.of(context).pop();
+            _libraryKey.currentState?.openCloudCatalog();
+          },
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
     final s = LLStrings.of(context);
-    return Scaffold(
-      backgroundColor: ll.bg,
-      body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: llSystemOverlay(ll.brightness),
-        child: IndexedStack(
-          index: _index,
-          children: [
-            LibraryScreen(
-              key: _libraryKey,
-              repository: widget.repository,
-              creationController: _creationController,
-              vocabularyStore: _vocabularyStore,
-              onOpenLesson: (item, sentences) =>
-                  _openLesson(item, autoPlay: true),
-              // 生词本「回原声」：落到该证据所在的句子并直接开播。
-              onOpenLessonAtSentence: (item, sentences, index) => _openLesson(
-                item,
-                autoPlay: true,
-                startSentenceIndex: index,
-              ),
-              onOpenCreationTab: () => setState(() => _index = 2),
+    return LLPage(
+      safeArea: false,
+      body: IndexedStack(
+        index: _stackIndex,
+        children: [
+          LibraryScreen(
+            key: _libraryKey,
+            repository: widget.repository,
+            creationController: _creationController,
+            vocabularyStore: _vocabularyStore,
+            onOpenLesson: (item, sentences) =>
+                _openLesson(item, autoPlay: true),
+            // 生词本「回原声」：落到该证据所在的句子并直接开播。
+            onOpenLessonAtSentence: (item, sentences, index) => _openLesson(
+              item,
+              autoPlay: true,
+              startSentenceIndex: index,
             ),
-            _ListenTab(
-              key: _listenTabKey,
-              session: _session,
-              repository: widget.repository,
-              listeningScreenBuilder: widget.listeningScreenBuilder,
-              audioFacade: widget.audioFacade,
-              vocabularyStore: _vocabularyStore,
-            ),
-            CreationScreen(
-              controller: _creationController,
-              embedded: true,
-              onStartListening: (lesson) async {
-                final data = await widget.repository.getLessonWithSentences(
-                  lesson.id,
-                );
-                if (!mounted || data == null) return;
-                await _openLesson(
-                  LessonWithProgress(lesson: lesson),
-                  autoPlay: true,
-                  switchTab: true,
-                );
-              },
-              onImportLessonPackage: () =>
-                  _libraryKey.currentState?.importLessonPackage(),
-            ),
-            const SettingsScreen(),
-          ],
-        ),
+            onOpenCreationTab: _openCreationRoute,
+          ),
+          _ListenTab(
+            key: _listenTabKey,
+            session: _session,
+            repository: widget.repository,
+            listeningScreenBuilder: widget.listeningScreenBuilder,
+            audioFacade: widget.audioFacade,
+            vocabularyStore: _vocabularyStore,
+            onRequestReadAlongTab: () {
+              setState(() => _bottomIndex = 2);
+            },
+          ),
+          _ReadAlongTab(
+            key: _readAlongTabKey,
+            session: _session,
+            repository: widget.repository,
+            audioFacade: widget.audioFacade,
+            controller: _listenTabKey.currentState?.controller,
+          ),
+          SettingsScreen(repository: widget.repository),
+        ],
       ),
-      bottomNavigationBar: _buildBottomNav(context, ll, s),
+      bottomBar: _buildBottomNav(context, ll, s),
     );
   }
 
-  /// 4 tabs navigation: Library, Listen, Create, Settings.
+  /// 4 tabs navigation: 课程, 听, 跟读, 设置.
   Widget _buildBottomNav(BuildContext context, LLPalette ll, LLStrings s) {
     return Container(
       decoration: BoxDecoration(
@@ -302,7 +417,7 @@ class RootShellState extends State<RootShell> {
       child: SafeArea(
         top: false,
         child: BottomNavigationBar(
-          currentIndex: _index,
+          currentIndex: _bottomIndex,
           onTap: _onTabChanged,
           type: BottomNavigationBarType.fixed,
           backgroundColor: ll.bg,
@@ -314,19 +429,24 @@ class RootShellState extends State<RootShell> {
           iconSize: 22,
           items: [
             BottomNavigationBarItem(
-              icon: const Icon(Icons.auto_stories_outlined),
+              // 2026-10-20 郭老师：底部导航图标定制化（替换 Material 老图标）
+              icon: const LLNavCourseIcon(),
+              activeIcon: const LLNavCourseIcon(),
               label: s.tabLibrary,
             ),
             BottomNavigationBarItem(
-              icon: const Icon(Icons.headphones_outlined),
+              icon: const LLNavListenIcon(),
+              activeIcon: const LLNavListenIcon(),
               label: s.tabListen,
             ),
             BottomNavigationBarItem(
-              icon: const Icon(Icons.add_circle_outline),
-              label: s.tabCreate,
+              icon: const LLNavReadIcon(),
+              activeIcon: const LLNavReadIcon(),
+              label: s.tabReadAlong,
             ),
             BottomNavigationBarItem(
-              icon: const Icon(Icons.tune_outlined),
+              icon: const LLNavSettingsIcon(),
+              activeIcon: const LLNavSettingsIcon(),
               label: s.tabSettings,
             ),
           ],
@@ -347,10 +467,12 @@ class _ListenTab extends StatefulWidget {
     required this.listeningScreenBuilder,
     required this.audioFacade,
     required this.vocabularyStore,
+    this.onRequestReadAlongTab,
   });
 
   final ActiveLessonSession? session;
   final LessonRepository repository;
+  final VoidCallback? onRequestReadAlongTab;
 
   final Widget Function(
     BuildContext context,
@@ -370,6 +492,8 @@ class _ListenTab extends StatefulWidget {
 
 class _ListenTabState extends State<_ListenTab> {
   SentencePlayerController? _boundController;
+
+  SentencePlayerController? get controller => _boundController;
 
   /// Points at the hosted [ListeningScreen] so the shell can pause it
   /// (Settings) or reveal the current sentence (returning to Listen).
@@ -422,6 +546,16 @@ class _ListenTabState extends State<_ListenTab> {
     _screenKey?.currentState?.revealCurrentSentence();
   }
 
+  void enterReadAlong() {
+    _screenKey?.currentState?.enterReadAlong();
+  }
+
+  void exitReadAlong() {
+    _screenKey?.currentState?.exitReadAlong();
+  }
+
+  bool get isReadAlongOn => _screenKey?.currentState?.isReadAlongOn ?? false;
+
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
@@ -445,6 +579,7 @@ class _ListenTabState extends State<_ListenTab> {
     final item = session.item;
     final lesson = item.lesson;
     final progress = item.progress;
+
     final listening = ListeningScreen(
       key: _screenKey,
       title: lesson.title,
@@ -463,9 +598,12 @@ class _ListenTabState extends State<_ListenTab> {
       initialRepeatTarget: progress?.repeatTarget ?? 1,
       initialPlaybackRate: progress?.playbackRate ?? 1.0,
       initialSubtitleMode: progress?.subtitleMode,
-      initialPageMode: progress?.displayMode == 'page',
+      initialPageMode: progress?.displayMode != null
+          ? (progress!.displayMode == 'page')
+          : null,
       onControllerCreated: (controller) => _boundController = controller,
       audioFacade: widget.audioFacade,
+      onRequestReadAlongTab: widget.onRequestReadAlongTab,
     );
     // Test seam: observe navigation without the audio stack.
     final builder = widget.listeningScreenBuilder;
@@ -473,5 +611,94 @@ class _ListenTabState extends State<_ListenTab> {
       return builder(context, item, session.sentences);
     }
     return listening;
+  }
+}
+
+/// The ReadAlong tab: hosts the active lesson's [ChineseReadingScreen] (or the
+/// quiet empty state). It is an independent first-class tab in [IndexedStack].
+class _ReadAlongTab extends StatefulWidget {
+  const _ReadAlongTab({
+    super.key,
+    required this.session,
+    required this.repository,
+    required this.audioFacade,
+    this.controller,
+  });
+
+  final ActiveLessonSession? session;
+  final LessonRepository repository;
+  final AudioPlayerFacade? audioFacade;
+  final SentencePlayerController? controller;
+
+  @override
+  State<_ReadAlongTab> createState() => _ReadAlongTabState();
+}
+
+class _ReadAlongTabState extends State<_ReadAlongTab> {
+  SentencePlayerController? _ownedController;
+  String? _ownedLessonId;
+
+  void onLeave() {
+    final c = widget.controller ?? _ownedController;
+    c?.pause();
+  }
+
+  @override
+  void dispose() {
+    _ownedController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = widget.session;
+    if (session == null) {
+      final s = LLStrings.of(context);
+      return Center(
+        child: Column(
+          key: const Key('read-along-empty'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const LLMark(size: 48, color: LLColors.textTertiary),
+            const SizedBox(height: LLSpacing.lg),
+            Text(s.listenEmptyTitle, style: LLText.rowTitle),
+            const SizedBox(height: LLSpacing.sm),
+            Text(s.listenEmptyBody, style: LLText.caption),
+          ],
+        ),
+      );
+    }
+
+    final item = session.item;
+    final lesson = item.lesson;
+    final controller = widget.controller ?? _getOrCreateController(session);
+
+    return ChineseReadingScreen(
+      key: ValueKey('read-along-${lesson.id}'),
+      lesson: lesson,
+      sentences: session.sentences,
+      controller: controller,
+      onSelectSentence: (index) {
+        controller.selectSentence(index);
+      },
+    );
+  }
+
+  SentencePlayerController _getOrCreateController(ActiveLessonSession session) {
+    final lid = session.item.lesson.id;
+    if (_ownedController != null && _ownedLessonId == lid) {
+      return _ownedController!;
+    }
+    _ownedController?.dispose();
+    _ownedLessonId = lid;
+    _ownedController = SentencePlayerController(
+      audioFacade: widget.audioFacade ?? JustAudioFacade(),
+      sentences: session.sentences,
+      audioAsset: session.item.lesson.audioPath,
+      audioIsFile: true,
+      initialSentenceIndex: session.startSentenceIndex ?? 0,
+    );
+    unawaited(_ownedController!.initialize());
+    return _ownedController!;
   }
 }

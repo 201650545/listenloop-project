@@ -8,8 +8,8 @@ import '../preferences/app_preferences.dart';
 /// Minimal hand-rolled UI copy table (follow-up: 中/英界面切换).
 ///
 /// Deliberately NOT flutter_localisations codegen — the surface is small and
-/// the brand voice is part of the design. The wordmark `ListenLoop` and font
-/// names (Sans/Serif/System) stay untranslated in both languages.
+/// the brand voice is part of the design. The wordmark 句读 / Phrasing and
+/// font names (Sans/Serif/System) stay untranslated in both languages.
 class LLStrings {
   const LLStrings(this.uiLanguage);
 
@@ -22,6 +22,11 @@ class LLStrings {
 
   /// 界面语言判定（供新页面复用，避免各自硬编码中英判断）。
   bool get isZh => _isZh;
+
+  /// 产品 wordmark（首页 / 顶栏）。2026-10-10 定名「句读 / Phrasing」，
+  /// 中文界面主标「句读」、英文界面用 `Phrasing`——与启动页揭幕、设置页卷首同口径。
+  /// 品牌名不参与翻译，只按界面语言二选一。
+  String get appWordmark => _isZh ? '句读' : 'Phrasing';
 
   // -------------------------------------------------------------- vocab ----
   // 生词本（附属层）：入口开在三级。文案遵循 10 号文档红线 ——
@@ -37,8 +42,70 @@ class LLStrings {
       : 'Long-press and drag to collect a phrase (2–5 words), e.g. take off';
   String get vocabRemoved => _isZh ? '已取消' : 'Removed';
 
+  // P2 非破坏式已知词反哺（08 号红线：只弱化视觉，不删内容）
+  String get vocabKnownWordsHighlight => _isZh ? '已知词淡化' : 'Dim known words';
+  String get vocabKnownWordsHighlightHint => _isZh
+      ? '已掌握的词会变淡（仅颜色），完整保留显示与点击'
+      : 'Known words fade (colour only); they stay fully visible and tappable';
+
   String vocabCandidateCount(int count) =>
       _isZh ? '候选池 $count 个词' : '$count candidates';
+
+  // 14 号：闪卡复习入口（首页「词汇记忆」双卡区块）
+  String get reviewEntryTitle => _isZh ? '闪卡复习' : 'Flashcard review';
+  String reviewEntryDue(int count) =>
+      _isZh ? '待复习 $count 张' : '$count due';
+  String get reviewEntryDone =>
+      _isZh ? '今日复习已完成' : 'Review done for today';
+
+  // 15 号 Phase A 第一优先：Meaning Recall
+  String get mrTitle => _isZh ? '意思回忆' : 'Meaning Recall';
+  String get mrPromptTitle => _isZh ? '这句话的意思是……' : 'The meaning is…';
+  String get mrPrompt => _isZh
+      ? '用英语表达这句话的意思，不要求和原句一样'
+      : 'Express this meaning in English (your own words are fine)';
+  String get mrHint => _isZh
+      ? '用你自己的英语表达这个意思……'
+      : 'Express this meaning in your own English…';
+  String get mrSubmit => _isZh ? '提交' : 'Submit';
+  String get mrFeedbackTitle => _isZh ? 'AI 反馈' : 'AI Feedback';
+  String get mrOriginalLabel => _isZh ? '原句' : 'Original';
+  /// 听写完成流入口：批改后把错句接进「意思回忆」。
+  String get mrDrillTitle => _isZh ? '错句练习' : 'Drill mistakes';
+  String get mrDrillEmpty => _isZh ? '没有需要打磨的错句' : 'Nothing to polish';
+  String get mrDrillHint => _isZh
+      ? '这些是听写批改里对齐可靠、有错的句子；留空句与对齐不可靠的句子会留在听写里重听，不进这里。'
+      : 'Reliably-aligned mistakes from your dictation. Blanks and unreliable lines stay in dictation.';
+  String get mrDrillNext => _isZh ? '下一句' : 'Next';
+  String get mrDrillPrev => _isZh ? '上一句' : 'Previous';
+  String get mrDrillDone => _isZh ? '完成练习' : 'Finish';
+
+  /// 听写完成流入口：页脚常驻次级入口文案。
+  String mrDrillEntry(int count) =>
+      _isZh ? '$count 句有待打磨 → 去意思回忆' : '$count to polish → meaning recall';
+
+  /// ListenRetryTarget 出口（v0.9.1）：留空/对齐不可靠句 → 回原声重听。
+  String dictationRelistenEntry(int count) =>
+      _isZh ? '$count 句还没听清 → 回原声重听' : '$count unclear → listen again';
+
+  /// Meaning Recall modified output（v0.9.1）：反馈后再答一次的引导语。
+  String get mrRetryPrompt => _isZh
+      ? '意思基本表达到了。根据反馈，这次把目标词用上，再说一次：'
+      : 'Close enough. Now retry using the target word(s):';
+
+  String get mrRetryButton => _isZh ? '再说一次' : 'Try again';
+
+  String get mrRetryUsed => _isZh
+      ? '已重答一次。可对照参考表达后进入下一句。'
+      : 'One retry used. Compare with the reference and move on.';
+
+  String get mrSeeReference => _isZh ? '看参考表达' : 'Show reference';
+
+  /// 队列进度：第 N / 总 M 句。
+  String mrDrillCount(int current, int total) =>
+      _isZh ? '第 $current / $total 句' : 'Sentence $current / $total';
+
+  // 生词本管理页（Library 二级）。枚举一律走 key 映射 —— l10n 不依赖模型层。
 
   // 生词本管理页（Library 二级）。枚举一律走 key 映射 —— l10n 不依赖模型层。
   String get vocabBook => _isZh ? '生词本' : 'Vocabulary';
@@ -66,6 +133,31 @@ class LLStrings {
   String vocabExportDone(int count) =>
       _isZh ? '已导出 $count 张卡' : 'Exported $count cards';
   String get vocabExportFailed => _isZh ? '导出失败，请重试' : 'Export failed, please retry';
+  String get dataBackupTooltip => _isZh ? '备份学习数据' : 'Back up learning data';
+  String get dataBackupDone => _isZh ? '备份已导出，可在分享面板选择保存位置' : 'Backup exported — choose a destination in the share sheet';
+  String get dataBackupFailed => _isZh ? '备份失败，请重试' : 'Backup failed, please retry';
+  String get dataBackupNoData => _isZh ? '还没有可备份的学习数据' : 'No learning data to back up yet';
+  String get dataImportTooltip => _isZh ? '导入备份' : 'Import backup';
+  String get dataImportDone => _isZh ? '备份已导入' : 'Backup imported';
+  String get dataImportFailed => _isZh ? '导入失败，请重试' : 'Import failed, please retry';
+  String get dataImportInvalid =>
+      _isZh ? '这个文件不是有效的句读备份' : 'This file is not a valid Phrasing backup';
+  String get dataImportVersionTooNew =>
+      _isZh ? '备份来自更新版本，请先升级应用再导入' : 'Backup is from a newer version — upgrade the app first';
+  String get dataImportNoItems =>
+      _isZh ? '备份里没有可导入的学习数据' : 'No learning data to import in this backup';
+  String dataImportPreview(int merged, int skipped) => _isZh
+      ? '将导入 $merged 个词条，跳过 $skipped 个本机已有的'
+      : 'Import $merged items, skip $skipped already on this device';
+  String get dataImportConfirmTitle => _isZh ? '导入备份' : 'Import backup';
+  String get dataImportConfirmBody => _isZh
+      ? '备份来自另一台设备。本机已有的词条会保留，只补充本机没有的。学习进度与 AI 卡片本次不恢复。'
+      : 'This backup came from another device. Items already on this device are kept; only missing ones are added. Progress and AI cards are not restored.';
+  String get dataImportConfirmMerge => _isZh ? '合并导入' : 'Merge';
+  String get dataImportConfirmOverwrite => _isZh ? '清空后导入' : 'Replace all';
+  String get dataImportOverwriteWarning => _isZh
+      ? '清空后导入会丢失本机现有的全部词条，确定？'
+      : 'Replace-all deletes every item currently on this device. Continue?';
   String get legacyCardsClearedTitle => _isZh ? '导出完成' : 'Exported';
   String get legacyCardsClearedBody => _isZh
       ? '旧版闪卡已打包为 .apkg，可导入桌面版 Anki / AnkiDroid。是否清除本地旧数据？（新闪卡在生词本里，不受影响）'
@@ -369,7 +461,8 @@ class LLStrings {
 
   // ------------------------------------------------------------ shell ----
   String get tabLibrary => _isZh ? '课程' : 'Library';
-  String get tabListen => _isZh ? '精听' : 'Listen';
+  String get tabListen => _isZh ? '听' : 'Listen';
+  String get tabReadAlong => _isZh ? '读' : 'Read';
   String get tabCreate => _isZh ? '创建' : 'Create';
   String get tabSettings => _isZh ? '设置' : 'Settings';
 
@@ -463,8 +556,8 @@ class LLStrings {
   String get languageSection => _isZh ? '语言' : 'LANGUAGE';
   String get theme => _isZh ? '主题' : 'Theme';
   String get system => _isZh ? '跟随系统' : 'System';
-  String get light => _isZh ? '浅色' : 'Light';
-  String get dark => _isZh ? '深色' : 'Dark';
+  String get light => _isZh ? '白昼' : 'Light';
+  String get dark => _isZh ? '黑夜' : 'Dark';
   String get font => _isZh ? '字体' : 'Font';
   String get textSize => _isZh ? '字号' : 'Text size';
   String get textSizeSheet => _isZh ? '滑动调整字号' : 'Text size';
@@ -598,6 +691,11 @@ class LLStrings {
 
   String get createLesson => _isZh ? '制作课程' : 'Create Lesson';
   String get creationMenuImport => _isZh ? '导入课程' : 'Import Lesson';
+
+  /// 空状态主按钮：制作新课程。
+  /// 2026-10-16 修：此前 `library_screen.dart` 空状态把它**硬编码成中文**，
+  /// 英文界面下中文串偏长，直接把 Row 顶出 `RIGHT OVERFLOWED BY 26 PIXELS`。
+  String get createNewLesson => _isZh ? '制作新课程' : 'New Lesson';
   String get creationMenuFromFile => _isZh ? '从本地文件创建' : 'Create from File';
   String get creationMenuFromLink => _isZh ? '从链接创建' : 'Create from Link';
   String get soon => _isZh ? '即将支持' : 'soon';
@@ -640,4 +738,37 @@ class LLStrings {
       _isZh ? '存储空间不足。' : 'Not enough free storage.',
     CreationError.cancelled => _isZh ? '已取消。' : 'Cancelled.',
   };
+
+  // ----------------------------------------------------------- startup ----
+  // 启动期一次性提示（Task 1.4 硬化）：本地课程库打开失败时不再静默降级。
+  // 文案按码映射，与界面语言同步；详情里暴露原始异常，便于诊断。
+  String startupNoticeTitle(StartupNoticeKind kind) => switch (kind) {
+    StartupNoticeKind.dbOpenFailed =>
+      _isZh ? '本地课程库打不开' : 'Local lesson library unavailable',
+  };
+  String startupNoticeBody(StartupNoticeKind kind) => switch (kind) {
+    StartupNoticeKind.dbOpenFailed => _isZh
+        ? '已降级为临时模式：本次启动导入的课程不会跨启动保留。请重装应用或检查存储权限后重启。'
+        : 'Running in temporary mode: lessons imported this session will not '
+            'persist. Reinstall the app or check storage permissions, then restart.',
+  };
+  String get startupNoticeDetail => _isZh ? '查看详情' : 'Details';
+  String get startupNoticeDismiss => _isZh ? '知道了' : 'Got it';
+  String get startupNoticeDetailTitle => _isZh ? '启动诊断详情' : 'Startup diagnostics';
+  String get startupNoticeDetailClose => _isZh ? '关闭' : 'Close';
+}
+
+/// 启动期一次性提示的类型码（文案在 [LLStrings] 里映射，与界面语言同步）。
+enum StartupNoticeKind { dbOpenFailed }
+
+/// 启动期一次性提示的数据载体：类型 + 原始异常（供诊断详情展示）。
+///
+/// 由 [main] 在启动时构造，经首屏透传给一次性的启动提示弹窗
+/// （Task 1.4 硬化：本地库降级不再静默）。放在这里而非 main.dart，
+/// 是为了让首屏不必反向依赖入口文件。
+class StartupNotice {
+  const StartupNotice(this.kind, {this.error, this.stackTrace});
+  final StartupNoticeKind kind;
+  final Object? error;
+  final StackTrace? stackTrace;
 }

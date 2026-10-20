@@ -26,6 +26,7 @@ class CreationScreen extends StatefulWidget {
     this.input,
     required this.onStartListening,
     this.onImportLessonPackage,
+    this.onOpenCloudCatalog,
     this.embedded = false,
   });
 
@@ -33,6 +34,7 @@ class CreationScreen extends StatefulWidget {
   final LessonInput? input;
   final Future<void> Function(Lesson lesson) onStartListening;
   final VoidCallback? onImportLessonPackage;
+  final VoidCallback? onOpenCloudCatalog;
   final bool embedded;
 
   @override
@@ -47,6 +49,7 @@ class _CreationScreenState extends State<CreationScreen> {
   Timer? _elapsedTimer;
   final TextEditingController _urlInputController = TextEditingController();
   String? _selectedLanguage; // null = auto-detect, 'ja', 'en', 'zh'
+  bool _readingMode = false; // 课文朗读模式：按逗号/句号朗读单元切句
 
   @override
   void initState() {
@@ -97,6 +100,7 @@ class _CreationScreenState extends State<CreationScreen> {
     final input = LessonInput.link(
       source: link,
       language: _selectedLanguage,
+      readingMode: _readingMode,
     );
     _openProgressPage();
     await widget.controller.start(input);
@@ -110,6 +114,7 @@ class _CreationScreenState extends State<CreationScreen> {
       path: path,
       titleHint: p.basenameWithoutExtension(path),
       language: _selectedLanguage,
+      readingMode: _readingMode,
     );
     _openProgressPage();
     await widget.controller.start(input);
@@ -131,7 +136,12 @@ class _CreationScreenState extends State<CreationScreen> {
       child: Scaffold(
         backgroundColor: ll.bg,
         appBar: AppBar(
-          automaticallyImplyLeading: false,
+          automaticallyImplyLeading: true,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: ll.textPrimary),
+            tooltip: '返回课程',
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
           title: Text(
             s.createLesson,
             style: LLText.rowTitle.copyWith(color: ll.textPrimary),
@@ -149,9 +159,13 @@ class _CreationScreenState extends State<CreationScreen> {
                   selectedLanguage: _selectedLanguage,
                   onSelectLanguage: (lang) =>
                       setState(() => _selectedLanguage = lang),
+                  readingMode: _readingMode,
+                  onToggleReadingMode: (value) =>
+                      setState(() => _readingMode = value),
                   onStartFromLink: _startFromLink,
                   onStartFromFile: _startFromFile,
                   onImportPackage: widget.onImportLessonPackage,
+                  onOpenCloudCatalog: widget.onOpenCloudCatalog,
                   onOpenProgressPage: _openProgressPage,
                   onStartListening: widget.onStartListening,
                 );
@@ -678,9 +692,12 @@ class _CreationIdle extends StatelessWidget {
     required this.urlController,
     required this.selectedLanguage,
     required this.onSelectLanguage,
+    required this.readingMode,
+    required this.onToggleReadingMode,
     required this.onStartFromLink,
     required this.onStartFromFile,
     this.onImportPackage,
+    this.onOpenCloudCatalog,
     required this.onOpenProgressPage,
     required this.onStartListening,
   });
@@ -689,9 +706,12 @@ class _CreationIdle extends StatelessWidget {
   final TextEditingController urlController;
   final String? selectedLanguage;
   final ValueChanged<String?> onSelectLanguage;
+  final bool readingMode;
+  final ValueChanged<bool> onToggleReadingMode;
   final VoidCallback onStartFromLink;
   final VoidCallback onStartFromFile;
   final VoidCallback? onImportPackage;
+  final VoidCallback? onOpenCloudCatalog;
   final VoidCallback onOpenProgressPage;
   final Future<void> Function(Lesson lesson) onStartListening;
 
@@ -837,6 +857,28 @@ class _CreationIdle extends StatelessWidget {
                     ],
                   ),
                 ),
+                const SizedBox(height: LLSpacing.sm),
+                // 课文朗读模式（2026-09-29 用户需求）：按「读到逗号截止」
+                // 的朗读单元切句，每个短句可单句循环——早读带读用。
+                // 对中文链路生效；链接与本地文件两种导入都遵守。
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '课文朗读模式：按逗号分句，短句单句循环（早读带读）',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: ll.textTertiary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: readingMode,
+                      onChanged: onToggleReadingMode,
+                    ),
+                  ],
+                ),
                 const SizedBox(height: LLSpacing.md),
                 FilledButton.icon(
                   onPressed: onStartFromLink,
@@ -860,9 +902,19 @@ class _CreationIdle extends StatelessWidget {
             style: LLText.sectionLabel.copyWith(color: ll.textTertiary),
           ),
           const SizedBox(height: LLSpacing.md),
+          if (onOpenCloudCatalog != null) ...[
+            _ActionCard(
+              icon: Icons.cloud_download_outlined,
+              title: '在线课程库 (云端下载)',
+              subtitle: '从云服务器一键拉取课文包 · 免数据线',
+              onTap: onOpenCloudCatalog!,
+            ),
+            const SizedBox(height: LLSpacing.md),
+          ],
           _ActionCard(
             icon: Icons.audio_file_outlined,
             title: '本地音视频文件',
+            subtitle: '从手机相册、录音或下载目录选择音频',
             onTap: onStartFromFile,
           ),
           if (onImportPackage != null) ...[
@@ -870,6 +922,7 @@ class _CreationIdle extends StatelessWidget {
             _ActionCard(
               icon: Icons.folder_zip_outlined,
               title: '导入 .lllesson 课程包',
+              subtitle: '从手机存储选择已制作的离线课程包',
               onTap: onImportPackage!,
             ),
           ],
@@ -982,11 +1035,13 @@ class _ActionCard extends StatelessWidget {
   const _ActionCard({
     required this.icon,
     required this.title,
+    this.subtitle,
     required this.onTap,
   });
 
   final IconData icon;
   final String title;
+  final String? subtitle;
   final VoidCallback onTap;
 
   @override
@@ -1007,13 +1062,25 @@ class _ActionCard extends StatelessWidget {
             Icon(icon, size: 28, color: ll.textPrimary),
             const SizedBox(width: LLSpacing.lg),
             Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: ll.textPrimary,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: ll.textPrimary,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: TextStyle(fontSize: 12, color: ll.textTertiary),
+                    ),
+                  ],
+                ],
               ),
             ),
             Icon(Icons.chevron_right, color: ll.textTertiary, size: 20),

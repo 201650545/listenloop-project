@@ -1,8 +1,9 @@
 import 'dart:io';
 import 'dart:isolate';
 
-
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
 import '../preferences/app_preferences.dart';
@@ -11,6 +12,25 @@ import 'asr_window_planner.dart';
 import 'seam_reconciler.dart';
 import 'vad_segmenter.dart';
 import 'word_timestamp.dart';
+
+/// 默认 ASR 模型根目录（App 私有目录，历史位置）。
+/// 大模型（FireRedASR2-CTC 740MB）的 adb 部署走 [_rootCandidates] 里的
+/// App 外部目录——release 包 run-as 不可用，但 adb 可写
+/// `/sdcard/Android/data/<pkg>/files/`（App 对自己的外部目录永远可读）。
+Future<String> defaultAsrModelDir() async {
+  final docs = await getApplicationDocumentsDirectory();
+  return p.join(docs.path, 'models', 'asr');
+}
+
+/// 中文流自动换档（2026-10-01 手机端轻量模型矩阵）：
+/// 语言 hint 为 zh 时用「中文手机主力档」（Zipformer CTC small zh），
+/// 否则回退设置档（默认 fast = NeMo Parakeet CTC 110M 英文手机主力）。
+AsrTier resolveTierForLanguage(String? language, AsrTier configured) {
+  if (language != null && language.trim().toLowerCase().startsWith('zh')) {
+    return AsrTier.zhSmall;
+  }
+  return configured;
+}
 
 /// Runs INSIDE a spawned isolate.
 ///
@@ -30,43 +50,129 @@ import 'word_timestamp.dart';
 ///
 /// Progress is streamed back over `payload['port']` — a 30 minute job would
 /// otherwise sit on a frozen bar for minutes.
+/// 常驻 ASR worker 隔离区：**模型只加载一次**，之后循环接活。
+///
+/// PC 实测（2026-10-15）：zipformer-ctc small zh 构造 recognizer ≈ 8.5s，
+/// 而解码 5.6s 音频只要 ≈ 0.17s。旧实现每次 `transcribe` 都 `Isolate.spawn`
+/// 并在里面重建 recognizer —— 跟读边读边预览每 2 秒一拍，等于每 2 秒
+/// 重加载一次 60MB 模型，慢的是加载不是解码。常驻后每拍只付解码的钱。
 void _decodeInIsolate(Map<String, Object> payload) {
-  final port = payload['port'] as SendPort;
-  void progress(double value) => port.send(value);
+  final ready = payload['ready'] as SendPort;
+  final jobs = ReceivePort();
+  // 昂贵的一半：只在 worker 起时付一次。
+  final recognizer = _buildRecognizer(payload);
+  ready.send(jobs.sendPort);
+  jobs.listen((dynamic message) {
+    if (message is! Map) return;
+    if (message['stop'] == true) {
+      jobs.close();
+      return;
+    }
+    final reply = message['port'] as SendPort;
+    try {
+      _decodeJob(recognizer, payload, message, reply);
+    } catch (error) {
+      reply.send({'error': '$error'});
+    }
+  });
+}
 
+/// 按档位配置造 recognizer（贵：加载 ONNX 模型）。
+sherpa.OfflineRecognizer _buildRecognizer(Map<String, Object> payload) {
   sherpa.initBindings();
   final dir = payload['dir']! as String;
   final sep = Platform.pathSeparator;
-  // Self-exported whisper with cross-attention outputs (see the class doc):
-  // the only model form that yields word-level timestamps, hence the only
-  // shipped engine configuration.
   final targetLanguage = (payload['language'] as String? ?? '').trim();
-  final config = sherpa.OfflineRecognizerConfig(
-    model: sherpa.OfflineModelConfig(
+  final modelKind = (payload['modelKind'] as String? ?? 'whisper').trim();
+  final sherpa.OfflineModelConfig modelConfig;
+  if (modelKind == 'paraformer') {
+    // sherpa-onnx-paraformer-zh-small-2024-03-09（中文·手机主力，~81.8MB）
+    modelConfig = sherpa.OfflineModelConfig(
+      paraformer: sherpa.OfflineParaformerModelConfig(
+        model: '$dir$sep${payload['singleModel']}',
+      ),
+      tokens: '$dir$sep${payload['tokens']}',
+      modelType: 'paraformer',
+      numThreads: int.tryParse(payload['threads'] as String? ?? '') ??
+          kDefaultAsrThreads,
+      debug: false,
+      provider: 'cpu',
+    );
+  } else if (modelKind == 'zipformer_ctc') {
+    // sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16（中文·手机主力，~60MB，31/31 字级时间戳）
+    modelConfig = sherpa.OfflineModelConfig(
+      zipformerCtc: sherpa.OfflineZipformerCtcModelConfig(
+        model: '$dir$sep${payload['singleModel']}',
+      ),
+      tokens: '$dir$sep${payload['tokens']}',
+      modelType: 'zipformer_ctc',
+      numThreads: int.tryParse(payload['threads'] as String? ?? '') ??
+          kDefaultAsrThreads,
+      debug: false,
+      provider: 'cpu',
+    );
+  } else if (modelKind == 'nemo_ctc') {
+    // sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8（英文·手机主力，~131.6MB）
+    modelConfig = sherpa.OfflineModelConfig(
+      nemoCtc: sherpa.OfflineNemoEncDecCtcModelConfig(
+        model: '$dir$sep${payload['singleModel']}',
+      ),
+      tokens: '$dir$sep${payload['tokens']}',
+      modelType: 'nemo_ctc',
+      numThreads: int.tryParse(payload['threads'] as String? ?? '') ??
+          kDefaultAsrThreads,
+      debug: false,
+      provider: 'cpu',
+    );
+  } else if (modelKind == 'fire_red_asr_ctc') {
+    modelConfig = sherpa.OfflineModelConfig(
+      fireRedAsrCtc: sherpa.OfflineFireRedAsrCtcModelConfig(
+        model: '$dir$sep${payload['singleModel']}',
+      ),
+      tokens: '$dir$sep${payload['tokens']}',
+      modelType: 'fire_red_asr_ctc',
+      numThreads: int.tryParse(payload['threads'] as String? ?? '') ??
+          kDefaultAsrThreads,
+      debug: false,
+      provider: 'cpu',
+    );
+  } else {
+    modelConfig = sherpa.OfflineModelConfig(
       whisper: sherpa.OfflineWhisperModelConfig(
         encoder: '$dir$sep${payload['encoder']}',
         decoder: '$dir$sep${payload['decoder']}',
-        // Multilingual checkpoints: targetLanguage supports 'en', 'ja', 'zh' etc.,
-        // or empty string for automatic language detection.
         language: targetLanguage,
         task: 'transcribe',
         enableTokenTimestamps: true,
       ),
       tokens: '$dir$sep${payload['tokens']}',
       modelType: 'whisper',
-      // Creation V2 §十五: not "all cores". The Snapdragon 8 Gen 3 is
-      // big.LITTLE; oversubscribing past the performance cluster buys heat,
-      // not throughput. Configurable so the 2/4/6/8 sweep needs no rebuild.
       numThreads: int.tryParse(payload['threads'] as String? ?? '') ??
           kDefaultAsrThreads,
       debug: false,
       provider: 'cpu',
+    );
+  }
+  return sherpa.OfflineRecognizer(
+    sherpa.OfflineRecognizerConfig(
+      model: modelConfig,
+      decodingMethod: 'greedy_search',
     ),
-    decodingMethod: 'greedy_search',
   );
-  final recognizer = sherpa.OfflineRecognizer(config);
+}
 
-  final bytes = File(payload['wav']! as String).readAsBytesSync();
+/// 跑一个识别任务（便宜的一半：模型已常驻，只做解码）。
+void _decodeJob(
+  sherpa.OfflineRecognizer recognizer,
+  Map<String, Object> payload,
+  Map<Object?, Object?> job,
+  SendPort port,
+) {
+  void progress(double value) => port.send(value);
+  final dir = payload['dir']! as String;
+  final sep = Platform.pathSeparator;
+
+  final bytes = File(job['wav']! as String).readAsBytesSync();
   const dataOffset = 44;
   // 16-bit mono at 16 kHz: 2 bytes per sample, 16 samples per millisecond.
   final audioMs = (bytes.length - dataOffset) ~/ 2 * 1000 ~/ 16000;
@@ -113,9 +219,31 @@ void _decodeInIsolate(Map<String, Object> payload) {
     recognizer.decode(stream);
     final result = recognizer.getResult(stream);
 
+    // 字节级 BBPE 档（中文手机主力档）：`result.tokens` 是 `tokens.txt` 里的
+    // 原始字节片，拼起来是 `▁ƌŕş…` 这种乱码；只有 `result.text` 是正确中文。
+    // 直接把 `text` 拆成字符当作 token 流，并把时间戳重采样到等长——
+    // 下游 `tokensToWords` 与接缝逻辑因此完全不用知道 BBPE 的存在。
+    final List<String> tokens;
+    final List<double> timestamps;
+    if (payload['byteLevelBpe'] == true) {
+      tokens = _charsOf(result.text);
+      timestamps = _resampleTimestamps(result.timestamps, tokens.length);
+      // WP-H 诊断常驻可见：BBPE 档必须看到 text 是中文、tokens 是字节片。
+      // ignore: avoid_print
+      print(
+        '[ReadAlong][diag][bbpe] win=$i rawTokens=${result.tokens.length} '
+        'rawJoined="${result.tokens.join().length > 40 ? result.tokens.join().substring(0, 40) : result.tokens.join()}" '
+        'text="${result.text}" chars=${tokens.length}',
+      );
+    } else {
+      tokens = result.tokens;
+      timestamps = result.timestamps;
+    }
+
     final local = tokensToWords(
-      result.tokens,
-      result.timestamps,
+      tokens,
+      timestamps,
+      durationMs: window.readEndMs - window.readStartMs,
     );
     for (final word in local) {
       // The one invariant that keeps the Timeline honest: global requires the
@@ -158,6 +286,47 @@ void _decodeInIsolate(Map<String, Object> payload) {
     'windows': windows.length,
     'audioMs': audioMs,
   });
+}
+
+/// Splits decoded text into per-character pieces.
+///
+/// Byte-level-BPE models hand back the finished string in `result.text` but
+/// only raw byte pieces in `result.tokens`, so the characters themselves are
+/// the finest granularity available. Punctuation stays as its own piece, which
+/// is what [tokensToWords] already expects (`music` + `.`).
+List<String> _charsOf(String text) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return const [];
+  return trimmed.split('');
+}
+
+/// Re-maps `count` source timestamps onto `length` output slots.
+///
+/// Used with [_charsOf]: a BBPE byte piece and a decoded character are not
+/// 1:1 (a Chinese character is typically 3 bytes), so the real per-token
+/// times have to be stretched over the characters they produced. Linear
+/// resampling keeps monotonic, in-range times, which is all the seam and
+/// ownership logic needs (Creation V2 §八).
+List<double> _resampleTimestamps(List<double> source, int length) {
+  if (source.isEmpty || length <= 0) return const [];
+  if (source.length == length) return source;
+  final total = source.last;
+  final out = <double>[];
+  for (var i = 0; i < length; i++) {
+    final t = length == 1 ? 0.0 : (i / (length - 1)) * (source.length - 1);
+    if (t >= source.length - 1) {
+      out.add(source.last);
+      continue;
+    }
+    final lo = t.floor();
+    final frac = t - lo;
+    out.add(source[lo] + (source[lo + 1] - source[lo]) * frac);
+  }
+  // Resampling lands on the last token time, never past it.
+  if (out.length == length && total > 0 && out.last > total) {
+    out[length - 1] = total;
+  }
+  return out;
 }
 
 /// Builds one window's samples straight out of the WAV bytes.
@@ -232,20 +401,99 @@ class SherpaOnnxAsrEngine implements AsrEngine {
 
   String? _resolvedRoot;
 
-  Future<String> _resolveTierDir() async {
-    final root = _resolvedRoot ??= await modelDirResolver();
-    final currentTier = tier?.call() ?? AsrTier.fast;
-    final sep = Platform.pathSeparator;
-    return '$root$sep${currentTier.modelDirName}';
+  /// 常驻 worker：key 是模型配置指纹，值是「投任务的 SendPort」。
+  ///
+  /// 同一个配置只加载一次模型，后续所有识别（含跟读每 2 秒的快照预览）
+  /// 复用它——见 [_decodeInIsolate] 的耗时实测。
+  final Map<String, Future<SendPort>> _workers = {};
+
+  /// 取（必要时启动）与 [config] 对应的常驻 worker。
+  ///
+  /// 配置变了（换档 / 换模型目录）就换 key 起新的；旧 worker 被丢弃，
+  /// 由 GC 随 isolate 回收，不主动 kill 以免打断在飞的解码。
+  Future<SendPort> _workerFor(Map<String, Object> config) {
+    final key = config.entries
+        .map((e) => '${e.key}=${e.value}')
+        .join('|');
+    return _workers.putIfAbsent(key, () async {
+      final ready = ReceivePort();
+      await Isolate.spawn(
+        _decodeInIsolate,
+        <String, Object>{...config, 'ready': ready.sendPort},
+      );
+      return await ready.first as SendPort;
+    });
   }
 
-  Future<bool> get _modelFilesExist async {
-    final dir = await _resolveTierDir();
-    final currentTier = tier?.call() ?? AsrTier.fast;
+  /// 该档的模型文件是否齐全（whisper 双档 vs CTC 单文件）。
+  Future<bool> _tierFilesExist(AsrTier currentTier, String dir) async {
     final sep = Platform.pathSeparator;
-    return File('$dir$sep${currentTier.encoderFile}').existsSync() &&
-        File('$dir$sep${currentTier.decoderFile}').existsSync() &&
+    if (currentTier.needsEncoderDecoder) {
+      return File('$dir$sep${currentTier.encoderFile}').existsSync() &&
+          File('$dir$sep${currentTier.decoderFile}').existsSync() &&
+          File('$dir$sep${currentTier.tokensFile}').existsSync();
+    }
+    return File('$dir$sep${currentTier.singleModelFile}').existsSync() &&
         File('$dir$sep${currentTier.tokensFile}').existsSync();
+  }
+
+  /// 按语言 hint 选档（2026-09-29：中文流自动换 FireRedASR2-CTC 中文朗读档），
+  /// 该档模型未安装时回退设置档（whisper）——增强项不阻塞（08 号红线）。
+  Future<(AsrTier, String, bool)> _resolveEffectiveTier(String? language) async {
+    final configured = tier?.call() ?? AsrTier.fast;
+    final wanted = resolveTierForLanguage(language, configured);
+    final wantedDir = await _dirFor(wanted);
+    if (await _tierFilesExist(wanted, wantedDir)) {
+      return (wanted, wantedDir, true);
+    }
+    if (wanted != configured) {
+      // WP-H 诊断常驻可见：静默 fallback 是头号坑，必须在 release/logcat 可见。
+      // ignore: avoid_print
+      print(
+        '[ReadAlong][diag][fallback] ${wanted.label} model not installed in '
+        '$wantedDir, falling back to ${configured.label}',
+      );
+      debugPrint(
+        '[ListenLoop][asr] ${wanted.label} model not installed, '
+        'falling back to ${configured.label}',
+      );
+      final fallbackDir = await _dirFor(configured);
+      return (configured, fallbackDir, false);
+    }
+    return (configured, wantedDir, false);
+  }
+
+  /// 模型根目录候选（按序探测，取第一个有该档模型文件的）：
+  /// 1. `modelDirResolver`（App 私有目录，历史位置）；
+  /// 2. App 外部目录 `Android/data/<pkg>/files/models/asr` —— adb 可写、
+  ///    App 可读（release 包 run-as 不可用，大模型 adb 部署走这里，
+  ///    2026-09-29 FireRedASR2-CTC 中文朗读档引入）。
+  Future<List<String>> _rootCandidates() async {
+    final primary = _resolvedRoot ??= await modelDirResolver();
+    final roots = <String>[primary];
+    final ext = await getExternalStorageDirectory();
+    if (ext != null && ext.path != primary) {
+      roots.add(p.join(ext.path, 'models', 'asr'));
+    }
+    return roots;
+  }
+
+  Future<String> _dirFor(AsrTier tierKind) async {
+    final sep = Platform.pathSeparator;
+    final roots = await _rootCandidates();
+    String? found;
+    for (final root in roots) {
+      for (final candidate in tierKind.dirCandidates) {
+        final dir = '$root$sep$candidate';
+        found ??= dir;
+        final exists = await _tierFilesExist(tierKind, dir);
+        debugPrint('[ListenLoop][asr] probe $dir '
+            'model=${File('$dir$sep${tierKind.needsEncoderDecoder ? tierKind.encoderFile : tierKind.singleModelFile}').existsSync()} '
+            'tokens=${File('$dir$sep${tierKind.tokensFile}').existsSync()} -> $exists');
+        if (exists) return dir;
+      }
+    }
+    return found ?? '${roots.first}$sep${tierKind.modelDirName}';
   }
 
   @override
@@ -256,36 +504,57 @@ class SherpaOnnxAsrEngine implements AsrEngine {
     required bool Function() isCancelled,
   }) async {
     onProgress(0);
-    if (!await _modelFilesExist) {
-      final currentTier = tier?.call() ?? AsrTier.fast;
-      final dir = await _resolveTierDir();
-      throw StateError(
-        'ASR model not installed in $dir '
-        '(expected ${currentTier.encoderFile}, ${currentTier.decoderFile} '
-        'and ${currentTier.tokensFile})',
+    final (currentTier, dir, usingZhModel) = await _resolveEffectiveTier(
+      language,
+    );
+    // WP-H 诊断常驻可见日志（执行方案 §一第1板斧 + §二修复A-2）：
+    // 中文课必须是 zh 系档，看到 en/nemo/fallback 就是元凶。
+    // 用 print 确保 release/logcat 可见（debugPrint 在 release 被抑制）。
+    // ignore: avoid_print
+    print(
+      '[ReadAlong][diag] language=${language ?? "(null)"} '
+      'tier=${currentTier.label} kind=${currentTier.sherpaModelKind} dir=$dir '
+      'usingZhModel=$usingZhModel',
+    );
+    if (usingZhModel) {
+      debugPrint('[ListenLoop][asr] tier=${currentTier.label} (中文手机主力)');
+    } else {
+      // ignore: avoid_print
+      print(
+        '[ReadAlong][diag][warn] NOT using zh model '
+        '(language=${language ?? "(null)"} tier=${currentTier.label})',
       );
+    }
+    if (!(await _tierFilesExist(currentTier, dir))) {
+      final missing = currentTier.needsEncoderDecoder
+          ? '${currentTier.encoderFile}, ${currentTier.decoderFile}, ${currentTier.tokensFile}'
+          : '${currentTier.singleModelFile}, ${currentTier.tokensFile}';
+      throw StateError('ASR model not installed in $dir (expected $missing)');
     }
     if (isCancelled()) return const [];
 
-    final dir = await _resolveTierDir();
-    final currentTier = tier?.call() ?? AsrTier.fast;
-
+    final config = <String, Object>{
+      'dir': dir,
+      'modelKind': currentTier.sherpaModelKind,
+      'encoder': currentTier.encoderFile,
+      'decoder': currentTier.decoderFile,
+      'singleModel': currentTier.singleModelFile,
+      'tokens': currentTier.tokensFile,
+      'byteLevelBpe': currentTier.tokensAreByteLevelBpe,
+      'vad': vadModelFile,
+      'threads': '${_threads()}',
+      'language': language ?? '',
+      // Whisper caps a single inference at 30 s; 25 s keep + 27 s hard max
+      // keeps the 2 s context overlap inside the cap (90 s is the NeMo
+      // bring-up value and no longer used by any shipped model).
+      'windowTargetMs': '25000',
+      'windowHardMaxMs': '27000',
+    };
     final messages = ReceivePort();
     try {
-      await Isolate.spawn(_decodeInIsolate, <String, Object>{
-        'dir': dir,
-        'encoder': currentTier.encoderFile,
-        'decoder': currentTier.decoderFile,
-        'tokens': currentTier.tokensFile,
-        'vad': vadModelFile,
+      final jobs = await _workerFor(config);
+      jobs.send(<String, Object>{
         'wav': wavPath,
-        'threads': '${_threads()}',
-        'language': language ?? '',
-        // Whisper caps a single inference at 30 s; 25 s keep + 27 s hard max
-        // keeps the 2 s context overlap inside the cap (90 s is the NeMo
-        // bring-up value and no longer used by any shipped model).
-        'windowTargetMs': '25000',
-        'windowHardMaxMs': '27000',
         'port': messages.sendPort,
       });
       // Progress arrives as doubles; the single Map is the final result.
@@ -299,7 +568,11 @@ class SherpaOnnxAsrEngine implements AsrEngine {
         }
       }
       if (isCancelled()) return const [];
-      if (result is! Map) return const [];
+      if (result is! Map) {
+        final failure = result == null ? null : (result as Map)['error'];
+        if (failure != null) throw StateError('ASR decode failed: $failure');
+        return const [];
+      }
 
       final raw = (result['words'] as List?) ?? const [];
       final words = <WordTimestamp>[
@@ -353,11 +626,27 @@ final RegExp _cjkPattern = RegExp(
 /// Handles both English space-separated pieces and CJK (Japanese/Chinese)
 /// continuous characters using punctuation, acoustic pauses (>250ms), and
 /// CJK word-span limits.
+///
+/// When [timestamps] are omitted or empty (e.g. models without CIF/timestamp heads
+/// like Paraformer small), [durationMs] is used to smoothly space words across
+/// the audio window so alignment and midpoint bounding remain consistent.
 List<WordTimestamp> tokensToWords(
   List<String> tokens,
-  List<double> timestamps,
-) {
+  List<double> timestamps, {
+  int? durationMs,
+}) {
   final words = <WordTimestamp>[];
+  if (tokens.isEmpty) return words;
+
+  final hasRealTimestamps =
+      timestamps.isNotEmpty && timestamps.any((t) => t > 0);
+  final effectiveTimestamps = hasRealTimestamps
+      ? timestamps
+      : List<double>.generate(tokens.length, (i) {
+          final totalMs = durationMs ?? (tokens.length * 200);
+          return (i / tokens.length) * (totalMs / 1000.0);
+        });
+
   final buffer = StringBuffer();
   var startMs = 0;
   var lastMs = 0;
@@ -379,7 +668,9 @@ List<WordTimestamp> tokensToWords(
 
   for (var i = 0; i < tokens.length; i++) {
     final raw = tokens[i];
-    final ms = i < timestamps.length ? (timestamps[i] * 1000).round() : lastMs;
+    final ms = i < effectiveTimestamps.length
+        ? (effectiveTimestamps[i] * 1000).round()
+        : lastMs;
     final body = raw.replaceFirst(_wordStartMarker, '').trim();
     if (body.isEmpty) {
       pendingBreak = true;

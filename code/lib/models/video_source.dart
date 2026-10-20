@@ -45,18 +45,26 @@ class VideoSource {
   ///
   /// For Bilibili: `autoplay=1` starts playback and `danmaku=0` hides bullet comments.
   /// For YouTube: `autoplay=1&enablejsapi=1` with start seconds.
+  ///
+  /// YouTube embed uses `www.youtube.com` (not the nocookie host) so the player
+  /// stays **same-origin** with the wrapper page the WebView loads it in
+  /// (see [YouTubeEmbedPage] in video_playback_facade.dart): the playback
+  /// harness must be able to reach the `<video>` element through the iframe.
+  /// `origin` mirrors the wrapper origin — YouTube's Error 153 identity check
+  /// compares the embedder origin against it.
   String playerUrlAt(int lessonMs) {
     final videoSeconds = ((lessonMs + offsetMs) / 1000).floor().clamp(
       0,
       1 << 31,
     );
     if (provider == providerYoutube) {
-      return Uri.https('www.youtube-nocookie.com', '/embed/$bvid', {
+      return Uri.https('www.youtube.com', '/embed/$bvid', {
         'autoplay': '1',
         'start': '$videoSeconds',
         'enablejsapi': '1',
         'playsinline': '1',
         'rel': '0',
+        'origin': 'https://www.youtube.com',
       }).toString();
     }
     return Uri.https('player.bilibili.com', '/player.html', {

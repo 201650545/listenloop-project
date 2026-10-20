@@ -34,6 +34,51 @@ abstract class VideoBridge {
 /// Message channel shared by the harness JS and [WebViewVideoBridge].
 const String kVideoBridgeChannel = 'LLVideo';
 
+/// Origin given to the YouTube wrapper page (and inherited by the embed
+/// iframe). Using YouTube's own host makes the embedder identity maximally
+/// trusted for the Error 153 check, and keeps the iframe same-origin so the
+/// playback harness can reach the `<video>` element.
+const String kYouTubeWrapperOrigin = 'https://www.youtube.com';
+
+/// Builds the wrapper HTML page that embeds [embedUrl] in a same-origin
+/// iframe.
+///
+/// Identity chain for YouTube's Error 153 check:
+/// 1. `baseUrl` (loadHtmlString) makes the wrapper page itself
+///    `https://www.youtube.com` → its outgoing requests carry that Referer.
+/// 2. `<meta name="referrer">` + the iframe's `referrerpolicy` guarantee the
+///    policy is `strict-origin-when-cross-origin`, so the origin — never an
+///    opaque null — reaches YouTube with every player request.
+/// 3. The `origin` embed param mirrors the wrapper origin, matching what the
+///    IFrame API would send from a real youtube.com page.
+String youTubeEmbedPageHtml(String embedUrl) {
+  // Attribute-safe form of the URL (escape quote characters just in case).
+  final safeUrl = embedUrl.replaceAll('"', '%22').replaceAll("'", '%27');
+  return '''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>LLVideo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<iframe
+  id="ll-frame"
+  src="$safeUrl"
+  referrerpolicy="strict-origin-when-cross-origin"
+  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+  allowfullscreen
+></iframe>
+</body>
+</html>''';
+}
+
 /// The harness that is (re)injected on every `onPageFinished`.
 ///
 /// It exposes `window.LLVideo` with a tiny command protocol and pushes playhead
@@ -64,7 +109,24 @@ const String _harnessJs = r'''
     for (var i = 0; i < list.length; i++) {
       if (list[i].duration > 0 || list[i].readyState >= 1) { return list[i]; }
     }
-    return list.length ? list[0] : null;
+    if (list.length) { return list[0]; }
+    // YouTube plays inside a same-origin iframe (Error 153 wrapper page);
+    // reach into its document for the media element.
+    try {
+      var frames = document.getElementsByTagName('iframe');
+      for (var f = 0; f < frames.length; f++) {
+        var doc = null;
+        try { doc = frames[f].contentDocument || frames[f].contentWindow.document; }
+        catch (e) { continue; /* cross-origin: skip */ }
+        if (!doc) { continue; }
+        var inner = doc.getElementsByTagName('video');
+        for (var j = 0; j < inner.length; j++) {
+          if (inner[j].duration > 0 || inner[j].readyState >= 1) { return inner[j]; }
+        }
+        if (inner.length) { return inner[0]; }
+      }
+    } catch (e) { /* frame access unavailable */ }
+    return null;
   }
 
   function ensureVideo() {
@@ -289,7 +351,28 @@ class WebViewVideoBridge implements VideoBridge {
     if (_readyCompleter.isCompleted) {
       _readyCompleter = Completer<void>();
     }
-    return controller.loadRequest(Uri.parse(url));
+    final uri = Uri.parse(url);
+    // YouTube Error 153「视频播放器配置错误」（2025-11 起收紧）：YouTube 要求
+    // 嵌入客户端能通过 HTTP Referer 验证身份。WebView 顶层直接加载 embed URL
+    // 时「嵌入者」身份缺失，仅靠 loadRequest 注入 Referer 头不可靠（该头只影
+    // 响主框架请求，播放器内部 API 请求校验的是嵌入页上下文）。
+    // 可靠修法（业界一致结论）：加载一个**同源包装页**，由它以 iframe 嵌入播
+    // 放器并声明 referrerpolicy —— iframe 的 Referer 即父页 origin
+    // （www.youtube.com），是 YouTube 完全信任的嵌入者。
+    // 包装页 baseUrl 用 https://www.youtube.com，与 iframe 同源，harness 才能
+    // 穿透 iframe 拿到 <video> 元素（bilibili 等其它源不受影响，仍走直接加载）。
+    if (uri.host.endsWith('youtube.com')) {
+      final html = youTubeEmbedPageHtml(url);
+      return controller.loadHtmlString(
+        html,
+        baseUrl: kYouTubeWrapperOrigin,
+      );
+    }
+    final headers = <String, String>{
+      if (uri.host.contains('youtube'))
+        'Referer': 'https://www.youtube.com/',
+    };
+    return controller.loadRequest(uri, headers: headers);
   }
 
   @override

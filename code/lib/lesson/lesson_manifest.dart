@@ -15,6 +15,7 @@ class LessonManifest {
     required this.sentenceFile,
     this.coverFile,
     this.video,
+    this.series,
   });
 
   /// The only format this build understands.
@@ -39,6 +40,10 @@ class LessonManifest {
   /// Optional online video the sentence timeline is shown against (V0.3 §3A).
   /// Null for audio-only lessons, which remain fully supported.
   final VideoSource? video;
+
+  /// 可选课程系列名（2026-09-29 课文朗读系列）：同一 series 的课程在课程
+  /// 列表中归组展示（如「二年级上册 1-4 单元朗读」）。Null = 不参与分组。
+  final String? series;
 
   /// Parses and validates a decoded manifest map.
   ///
@@ -97,6 +102,9 @@ class LessonManifest {
       sentenceFile: sentenceFile,
       coverFile: cover as String?,
       video: _video(json['video']),
+      series: json['series'] is String && (json['series'] as String).isNotEmpty
+          ? json['series'] as String
+          : null,
     );
   }
 

@@ -17,7 +17,9 @@ import 'creation_errors.dart';
 import 'lesson_input.dart';
 import 'lesson_job_stage.dart';
 import 'lesson_packager.dart';
+import 'sentence_aligner.dart';
 import 'segmentation_service.dart';
+import 'textbook_index.dart';
 import 'translation_service.dart';
 import 'word_timestamp.dart';
 import 'youtube_relay.dart';
@@ -48,6 +50,7 @@ class CreationController extends ChangeNotifier {
     Future<int> Function()? freeDiskSpaceResolver,
     String Function()? youtubeRelayBaseUrlResolver,
     YouTubeRelayClient Function(String baseUrl)? youtubeRelayFactory,
+    Future<TextbookIndex> Function()? textbookIndexResolver,
   }) : tempDirResolver = tempDirResolver ?? _defaultTempDirResolver,
        freeDiskSpaceResolver = freeDiskSpaceResolver ?? _defaultFreeDiskSpace,
        youtubeRelayBaseUrlResolver =
@@ -55,7 +58,9 @@ class CreationController extends ChangeNotifier {
            (() => YouTubeRelayClient.defaultBaseUrl),
        _youtubeRelayFactory =
            youtubeRelayFactory ??
-           ((baseUrl) => YouTubeRelayClient(baseUrl: baseUrl));
+           ((baseUrl) => YouTubeRelayClient(baseUrl: baseUrl)),
+       textbookIndexResolver =
+           textbookIndexResolver ?? TextbookIndex.loadDefault;
 
   final LessonRepository repository;
   final AudioPreprocessor audioPreprocessor;
@@ -74,6 +79,10 @@ class CreationController extends ChangeNotifier {
   /// Builds the relay client — a seam so tests can simulate an unreachable or
   /// healthy relay without a real PC.
   final YouTubeRelayClient Function(String baseUrl) _youtubeRelayFactory;
+
+  /// 中文课文索引的加载缝：默认读内置 asset，测试注入假的索引
+  /// （2026-09-29 中文切句新方案第②步）。
+  final Future<TextbookIndex> Function() textbookIndexResolver;
 
   static Future<Directory> _defaultTempDirResolver() => getTemporaryDirectory();
 
@@ -364,13 +373,54 @@ class CreationController extends ChangeNotifier {
       _logLines.add('Language: $resolvedLanguage');
 
       // ---- segmentation (§二十二) -------------------------------------------
+      // 2026-09-29 中文切句新方案（用户拍板的四步流）：识别为中文后，
+      // 先把 ASR 全文与内置课文索引对齐（第②步），命中则按课文标准句
+      // 切分字幕与时间轴（第③④步）；未命中或索引加载失败时回退常规
+      // 切句，并把中文的静音阈值放宽（二年级课文句间停顿长，18 号 §四）。
+      // 对齐失败永远不阻塞导入——它只是切句质量的增强项。
       _setStage(LessonJobStage.segmenting);
-      final drafts = await bench.stage(
-        'segment',
-        () async => SegmentationService.segment(words),
-      );
+      final isChinese = resolvedLanguage.startsWith('zh');
+      // 课文朗读模式只在中文链路生效（英文按句切分本来就在句号处）。
+      final readingMode = input.readingMode && isChinese;
+      TextbookAlignResult? textbookAligned;
+      final drafts = await bench.stage('segment', () async {
+        if (isChinese) {
+          try {
+            final index = await textbookIndexResolver();
+            final aligned = TextbookSentenceAligner.alignToBestTrack(
+              words,
+              index,
+              clauseLevel: readingMode,
+            );
+            if (aligned != null) {
+              textbookAligned = aligned;
+              return aligned.sentences;
+            }
+          } catch (error, stackTrace) {
+            debugPrint('[ListenLoop] textbook align skipped: $error\n$stackTrace');
+            _logLines.add('Textbook align: skipped ($error)');
+          }
+        }
+        return SegmentationService.segment(
+          words,
+          gapBreakMs: isChinese ? SegmentationService.kCjkGapBreakMs : null,
+          readingMode: readingMode,
+        );
+      });
+      if (readingMode) {
+        _logLines.add('Reading mode: ON');
+      }
+      if (textbookAligned != null) {
+        _logLines.add(
+          'Textbook: ${textbookAligned!.track.unit} '
+          '${textbookAligned!.track.title} '
+          '(match ${(textbookAligned!.score * 100).round()}%)',
+        );
+      }
       sentenceCount = drafts.length;
-      if (drafts.length < 3) {
+      // 课文朗读模式明确按朗读单元切分，短课文的少量单元是合法结果，
+      // 不适用「句子太少」守卫（该守卫针对的是不可用转写）。
+      if (textbookAligned == null && !readingMode && drafts.length < 3) {
         // Same guard as the PC pipeline: unusable transcription.
         //
         // 带上诊断量再报错。只给"句子太少"时，用户（和后面的排查者）无法分辨

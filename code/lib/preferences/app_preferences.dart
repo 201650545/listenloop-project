@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/profile_store.dart';
 import '../theme/ll_style.dart';
 
 /// Personal reading preferences (spec V2 §六–§二十六 + follow-up):
@@ -63,13 +64,19 @@ enum LearningChineseFont {
   };
 }
 
-/// Discrete presets shown in Settings (`A A A A` — S/M/L/XL). The stored
+/// Discrete presets shown in Settings (`字 字 字` — 小/中/大). The stored
 /// preference itself is the continuous [AppPreferences.textScale].
+///
+/// 2026-10-20 郭老师：字号不是"按档位加"（A− / A+ 一步步挪），而是**直接
+/// 挑一个**。所以预设从 4 档（S/M/L/XL）收到 3 档，档位名也换成中文
+/// 「小/中/大」——孩子和长辈都认得。
+///
+/// 枚举名（small/normal/large）保持不变：旧存档里存的是**枚举名**（见
+/// `SharedPrefsAppPreferencesStore` 的 legacy key），改名会让老用户丢设置。
 enum LearningTextSizePreset {
-  small(0.50, 'S'),
-  normal(0.75, 'M'),
-  large(1.00, 'L'),
-  extraLarge(1.30, 'XL');
+  small(0.75, '小'),
+  normal(1.00, '中'),
+  large(1.30, '大');
 
   const LearningTextSizePreset(this.scale, this.label);
 
@@ -112,8 +119,8 @@ const double kMaxTextScale = 1.50;
 /// 不可达。故 2026-09-23 用户拍板：**伴学与翻译全部改用 MiMo flash**。
 const String kDefaultMimoBaseUrl = 'https://api.xiaomimimo.com/v1';
 
-/// MiMo 的 Bearer key，随 App 预填（本仓库无远端，不外泄）。
-const String kDefaultMimoApiKey = 'sk-cn01v7bguiv9t5eydg1qm11pd4y76jeczxq61n0lrf9dnq7s';
+/// MiMo 的 Bearer key。对外分发与共享时默认留空，用户可在设置中自行配置。
+const String kDefaultMimoApiKey = '';
 
 /// 统一模型 `mimo-v2.6-flash`。手机侧直连实测：
 /// * 字幕翻译 6.9s，严格返回 `{"translations": [...]}` 且条数与输入一致；
@@ -431,6 +438,29 @@ class InMemoryAppPreferencesStore implements AppPreferencesStore {
 }
 
 class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
+  SharedPrefsAppPreferencesStore({String Function()? profileId})
+      : _profileId = profileId ?? (() => kDefaultProfileId);
+
+  /// 当前档案 id 的取数器（2026-10-20 离线登录）。
+  final String Function() _profileId;
+
+  /// 档案内的键。非默认档案加档案后缀；默认档案沿用老键（**老用户不丢设置**）。
+  String _scoped(String key) {
+    final id = _profileId();
+    if (id == kDefaultProfileId) return key;
+    return '$key.$id';
+  }
+
+  /// 读档案内的键；没有就退回全局键（新档案继承主档案的设置）。
+  String? _readString(SharedPreferences sp, String key) =>
+      sp.getString(_scoped(key)) ?? sp.getString(key);
+
+  double? _readDouble(SharedPreferences sp, String key) =>
+      sp.getDouble(_scoped(key)) ?? sp.getDouble(key);
+
+  bool? _readBool(SharedPreferences sp, String key) =>
+      sp.getBool(_scoped(key)) ?? sp.getBool(key);
+
   static const _keyThemeMode = 'listenloop:pref.themeMode';
   static const _keyStyle = 'listenloop:pref.style';
   static const _keyFont = 'listenloop:pref.learningFont';
@@ -481,7 +511,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
 
     final legacy = sp.getString(_legacyKeyTextSize);
     final scale =
-        sp.getDouble(_keyTextScale) ??
+        _readDouble(sp, _keyTextScale) ??
         (legacy == null
             ? null
             : LearningTextSizePreset.values
@@ -500,18 +530,18 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
         orElse: () => AppPreferences.defaults.style,
       ),
       learningFont: LearningFont.values.firstWhere(
-        (f) => f.name == sp.getString(_keyFont),
+        (f) => f.name == _readString(sp, _keyFont),
         orElse: () => AppPreferences.defaults.learningFont,
       ),
       learningChineseFont: LearningChineseFont.values.firstWhere(
-        (f) => f.name == sp.getString(_keyChineseFont),
+        (f) => f.name == _readString(sp, _keyChineseFont),
         orElse: () => AppPreferences.defaults.learningChineseFont,
       ),
       textScale:
           scale?.clamp(kMinTextScale, kMaxTextScale) ??
           AppPreferences.defaults.textScale,
       uiLanguage: AppLanguage.values.firstWhere(
-        (l) => l.name == sp.getString(_keyLanguage),
+        (l) => l.name == _readString(sp, _keyLanguage),
         orElse: () => AppPreferences.defaults.uiLanguage,
       ),
       translationBaseUrl: upgradeEndpoints
@@ -558,9 +588,9 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
           ? AppPreferences.defaults.tutorModel
           : (sp.getString(_keyTutorModel) ??
                 AppPreferences.defaults.tutorModel),
-      libraryGridView: sp.getBool(_keyLibraryGridView) ?? true,
-      scrubberHaptics: sp.getBool(_keyScrubberHaptics) ?? true,
-      lessonLoop: sp.getBool(_keyLessonLoop) ?? true,
+      libraryGridView: _readBool(sp, _keyLibraryGridView) ?? true,
+      scrubberHaptics: _readBool(sp, _keyScrubberHaptics) ?? true,
+      lessonLoop: _readBool(sp, _keyLessonLoop) ?? true,
       configVersion: kCurrentConfigVersion,
     );
   }
@@ -570,10 +600,14 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
     final sp = await SharedPreferences.getInstance();
     await sp.setString(_keyThemeMode, prefs.themeMode.name);
     await sp.setString(_keyStyle, prefs.style.name);
-    await sp.setString(_keyFont, prefs.learningFont.name);
-    await sp.setString(_keyChineseFont, prefs.learningChineseFont.name);
-    await sp.setDouble(_keyTextScale, prefs.textScale);
-    await sp.setString(_keyLanguage, prefs.uiLanguage.name);
+    // 跟档案走的偏好写进档案自己的键；默认档案沿用全局键（老设置不搬家）。
+    await sp.setString(_scoped(_keyFont), prefs.learningFont.name);
+    await sp.setString(
+      _scoped(_keyChineseFont),
+      prefs.learningChineseFont.name,
+    );
+    await sp.setDouble(_scoped(_keyTextScale), prefs.textScale);
+    await sp.setString(_scoped(_keyLanguage), prefs.uiLanguage.name);
     await sp.setString(_keyTranslationBaseUrl, prefs.translationBaseUrl);
     await sp.setString(_keyTranslationApiKey, prefs.translationApiKey);
     await sp.setString(_keyTranslationModel, prefs.translationModel);
@@ -583,9 +617,9 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
     await sp.setString(_keyTutorBaseUrl, prefs.tutorBaseUrl);
     await sp.setString(_keyTutorApiKey, prefs.tutorApiKey);
     await sp.setString(_keyTutorModel, prefs.tutorModel);
-    await sp.setBool(_keyLibraryGridView, prefs.libraryGridView);
-    await sp.setBool(_keyScrubberHaptics, prefs.scrubberHaptics);
-    await sp.setBool(_keyLessonLoop, prefs.lessonLoop);
+    await sp.setBool(_scoped(_keyLibraryGridView), prefs.libraryGridView);
+    await sp.setBool(_scoped(_keyScrubberHaptics), prefs.scrubberHaptics);
+    await sp.setBool(_scoped(_keyLessonLoop), prefs.lessonLoop);
     await sp.setInt(_keyConfigVersion, prefs.configVersion);
   }
 }

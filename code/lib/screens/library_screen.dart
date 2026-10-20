@@ -5,10 +5,12 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../anki/apkg_exporter.dart';
+import '../anki/apkg_share.dart';
 import '../creation/creation_controller.dart';
 import '../creation/bilibili_source.dart';
 import '../creation/creation_screen.dart';
@@ -28,14 +30,21 @@ import '../preferences/app_preferences.dart';
 import '../storage/lesson_repository.dart';
 import '../theme/listenloop_theme.dart';
 import '../training/vocabulary_plan.dart';
-import '../widgets/library/lesson_continue_card.dart';
 import '../widgets/library/lesson_editorial_row.dart';
 import '../widgets/library/lesson_language_tabs.dart';
 import '../widgets/library/lesson_poster_card.dart';
 import '../widgets/ll_brand.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../data/primary_chinese_curriculum.dart';
+import '../widgets/chinese_mind_map_view.dart';
 import '../widgets/subtitle_mode_selector.dart' show SubtitleMode, SubtitleModeX;
+import 'ai_speaking_sandbox_screen.dart';
 import 'listening_screen.dart';
+import 'primary_chinese_catalog_screen.dart';
 import 'vocabulary_book_screen.dart';
+import 'vocabulary_review_screen.dart';
+import '../widgets/ll_page.dart';
 
 const String _httpUserAgent = 'Mozilla/5.0 (Linux; Android 14) ListenLoop/1.0';
 
@@ -105,8 +114,11 @@ class LibraryScreen extends StatefulWidget {
 
 class LibraryScreenState extends State<LibraryScreen> {
   List<LessonWithProgress>? _items;
+  String _searchQuery = '';
+  final _searchController = TextEditingController();
+  final Set<String> _expandedSeries = {};
   bool _importing = false;
-  String _selectedLanguage = 'ALL';
+  String _selectedLanguage = 'EN';
   bool _isGridView = true;
 
   bool _effectiveGridView(BuildContext context) {
@@ -129,6 +141,11 @@ class LibraryScreenState extends State<LibraryScreen> {
   /// (the ∞ mark stays) and is retried on the next app start.
   final Set<String> _coverFetchTried = {};
 
+  // 中文课程记忆与锁定状态（持久化于 SharedPreferences）
+  int _chineseSelectedGrade = 2;
+  String _chineseSelectedTerm = '上册';
+  bool _isChineseGradeLocked = false;
+
   late final AiGovernorService _aiGovernorService =
       widget.aiGovernorService ?? AiGovernorService();
 
@@ -139,12 +156,44 @@ class LibraryScreenState extends State<LibraryScreen> {
   void initState() {
     super.initState();
     _reload();
+    _loadChineseGradePreferences();
     _vocabularyStore.addListener(_onVocabularyChanged);
     if (widget.vocabularyStore == null) {
       unawaited(_vocabularyStore.load());
     }
     widget.creationController.addListener(_onCreationChanged);
     _aiGovernorService.addListener(_onAiGovernorChanged);
+  }
+
+  Future<void> _loadChineseGradePreferences() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _chineseSelectedGrade = sp.getInt('listenloop:chinese_selected_grade') ?? 2;
+        _chineseSelectedTerm = sp.getString('listenloop:chinese_selected_term') ?? '上册';
+        _isChineseGradeLocked = sp.getBool('listenloop:chinese_grade_locked') ?? false;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _updateChineseGrade({int? grade, String? term, bool? locked}) async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      if (grade != null) {
+        _chineseSelectedGrade = grade;
+        await sp.setInt('listenloop:chinese_selected_grade', grade);
+      }
+      if (term != null) {
+        _chineseSelectedTerm = term;
+        await sp.setString('listenloop:chinese_selected_term', term);
+      }
+      if (locked != null) {
+        _isChineseGradeLocked = locked;
+        await sp.setBool('listenloop:chinese_grade_locked', locked);
+      }
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   void _onAiGovernorChanged() {
@@ -169,6 +218,7 @@ class LibraryScreenState extends State<LibraryScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     widget.creationController.removeListener(_onCreationChanged);
     _vocabularyStore.removeListener(_onVocabularyChanged);
     _aiGovernorService.removeListener(_onAiGovernorChanged);
@@ -187,6 +237,8 @@ class LibraryScreenState extends State<LibraryScreen> {
   Future<void> reload() => _reload();
 
   Future<void> importLessonPackage() => _onImportPressed();
+
+  Future<void> openCloudCatalog() => _openCloudCatalog();
 
   Future<void> _reload() async {
     final items = await widget.repository.listLessons();
@@ -282,34 +334,64 @@ class LibraryScreenState extends State<LibraryScreen> {
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: context.ll.surface,
+      // 菜单项会随语言/功能开关增减（中文下多出「在线课程库」一项），
+      // 固定高度会让 Column 在窄屏/大字号下溢出（实测小米14 报
+      // "BOTTOM OVERFLOWED BY 123 PIXELS"）。用可滚动容器兜住，
+      // 内容不超高时行为与原来一致。
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const _AsrTierSelector(),
-            ListTile(
-              leading: const Icon(Icons.folder_open_outlined),
-              title: Text(s.creationMenuImport),
-              onTap: () => Navigator.of(sheetContext).pop('import'),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _AsrTierSelector(),
+                if (_selectedLanguage == 'ZH')
+                  ListTile(
+                    leading: const Icon(Icons.cloud_download_rounded, color: Colors.blueAccent),
+                    title: const Text('在线课程库 (云端下载)'),
+                    subtitle: const Text('小学语文 1~6  · 名师原声朗读 · 免数据线'),
+                    onTap: () => Navigator.of(sheetContext).pop('cloud'),
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.add_circle_outline, color: Colors.orange),
+                  title: const Text('制作新课程 (二级页面)'),
+                  subtitle: const Text('从音视频或链接创建 · ASR识别 · 课文切句'),
+                  onTap: () => Navigator.of(sheetContext).pop('create-screen'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.folder_open_outlined),
+                  title: Text(s.creationMenuImport),
+                  subtitle: const Text('导入 .lllesson 课程包'),
+                  onTap: () => Navigator.of(sheetContext).pop('import'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.mic_none_outlined),
+                  title: Text(s.creationMenuFromFile),
+                  subtitle: Text(s.createLesson),
+                  onTap: () => Navigator.of(sheetContext).pop('create-file'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.link_outlined),
+                  title: Text(s.creationMenuFromLink),
+                  subtitle: const Text('bilibili / YouTube'),
+                  onTap: () => Navigator.of(sheetContext).pop('create-link'),
+                ),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.mic_none_outlined),
-              title: Text(s.creationMenuFromFile),
-              subtitle: Text(s.createLesson),
-              onTap: () => Navigator.of(sheetContext).pop('create-file'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.link_outlined),
-              title: Text(s.creationMenuFromLink),
-              subtitle: const Text('bilibili / YouTube'),
-              onTap: () => Navigator.of(sheetContext).pop('create-link'),
-            ),
-          ],
+          ),
         ),
       ),
     );
     if (!mounted) return;
     switch (action) {
+      case 'cloud':
+        await _openCloudCatalog();
+      case 'create-screen':
+        await _openCreationScreen();
       case 'import':
         await _onImportPressed();
       case 'create-file':
@@ -317,6 +399,24 @@ class LibraryScreenState extends State<LibraryScreen> {
       case 'create-link':
         await _onCreateFromLink();
     }
+  }
+
+  Future<void> _openCloudCatalog([String? query, int? grade, String? term]) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => PrimaryChineseCatalogScreen(
+          repository: widget.repository,
+          initialQuery: query,
+          initialGrade: grade ?? _chineseSelectedGrade,
+          initialTerm: term ?? _chineseSelectedTerm,
+          onLessonImported: (_) async {
+            await _reload();
+          },
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _reload();
   }
 
   /// M3 从链接创建 (2026-09-18): paste a bilibili link, the job downloads the
@@ -417,6 +517,8 @@ class LibraryScreenState extends State<LibraryScreen> {
               data.sentences,
             );
           },
+          onImportLessonPackage: _onImportPressed,
+          onOpenCloudCatalog: _openCloudCatalog,
         ),
       ),
     );
@@ -533,6 +635,7 @@ class LibraryScreenState extends State<LibraryScreen> {
     List<Sentence> sentences,
   ) {
     final progress = item.progress;
+
     SubtitleMode? restoredSubtitleMode;
     if (progress != null) {
       for (final mode in SubtitleMode.values) {
@@ -557,7 +660,9 @@ class LibraryScreenState extends State<LibraryScreen> {
       initialRepeatTarget: progress?.repeatTarget ?? 1,
       initialPlaybackRate: progress?.playbackRate ?? 1.0,
       initialSubtitleMode: restoredSubtitleMode?.name,
-      initialPageMode: progress?.displayMode == 'page',
+      initialPageMode: progress?.displayMode != null
+          ? (progress!.displayMode == 'page')
+          : null,
     );
   }
 
@@ -595,7 +700,9 @@ class LibraryScreenState extends State<LibraryScreen> {
             initialRepeatTarget: progress?.repeatTarget ?? 1,
             initialPlaybackRate: progress?.playbackRate ?? 1.0,
             initialSubtitleMode: progress?.subtitleMode,
-            initialPageMode: progress?.displayMode == 'page',
+            initialPageMode: progress?.displayMode != null
+                ? (progress!.displayMode == 'page')
+                : null,
             aiGovernorService: _aiGovernorService,
           );
         },
@@ -710,63 +817,747 @@ class LibraryScreenState extends State<LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final items = _items;
-    final ll = context.ll;
-    return Scaffold(
-      backgroundColor: ll.bg,
-      body: AnnotatedRegion<SystemUiOverlayStyle>(
-        value: llSystemOverlay(ll.brightness),
-        child: SafeArea(
-          child: items == null
-              ? const Center(child: LLInfinityLoader())
-              : _buildBody(context, items),
-        ),
-      ),
+    return LLPage(
+      body: items == null
+          ? const Center(child: LLInfinityLoader())
+          : _buildBody(context, items),
     );
   }
 
   Widget _buildBody(BuildContext context, List<LessonWithProgress> items) {
-    if (items.isEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildHeader(context),
-          _buildCreationBanner(context),
-          _buildAnkiBanner(context),
-        _buildVocabularyEntry(context),
-          Expanded(child: _EmptyLibrary(onImport: _onImportPressed)),
-        ],
-      );
-    }
-
     final languages = _extractLanguages(items);
+    final isChineseTab = _selectedLanguage == 'ZH';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildHeader(context),
-        _buildCreationBanner(context),
-        _buildAnkiBanner(context),
-        _buildVocabularyEntry(context),
-        if (languages.length >= 2) ...[
-          LessonLanguageTabs(
-            languages: languages,
-            selectedLanguage: _selectedLanguage,
-            onSelectLanguage: (lang) => setState(() => _selectedLanguage = lang),
+        // 全局搜索置顶：课程页最顶部，无论是否有课程或课程多少都永久可见
+        _buildSearchField(context),
+        // 筛选标签栏（[ 英文 | 中文 ] 黑白极简）与中文模式下的正方形课程库入口
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            LLSpacing.xl,
+            0,
+            LLSpacing.xl,
+            LLSpacing.xs,
           ),
-          const SizedBox(height: LLSpacing.xs),
+          child: Row(
+            children: [
+              Expanded(
+                child: LessonLanguageTabs(
+                  languages: languages,
+                  selectedLanguage: _selectedLanguage,
+                  onSelectLanguage: (lang) =>
+                      setState(() => _selectedLanguage = lang),
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+              if (isChineseTab) ...[
+                const SizedBox(width: LLSpacing.sm),
+                _buildSquareOnlineCatalogCard(context),
+              ],
+            ],
+          ),
+        ),
+        if (isChineseTab) ...[
+          if (_searchQuery.trim().isNotEmpty)
+            _buildChineseSearchJumpBar(context),
+          _buildChineseGradeHeader(context),
+          Expanded(
+            child: ChineseMindMapView(
+              grade: _chineseSelectedGrade,
+              term: _chineseSelectedTerm,
+              searchQuery: _searchQuery,
+              importedLessonTitles:
+                  _items?.map((e) => e.lesson.title).toSet() ?? const {},
+              onLessonTap: _openChineseLessonFromMindMap,
+            ),
+          ),
+        ] else ...[
+          _buildCreationBanner(context),
+          _buildAnkiBanner(context),
+          _buildVocabularyEntry(context),
+          Expanded(
+            child: _buildList(context, items),
+          ),
         ],
-        Expanded(child: _buildList(context, items)),
       ],
     );
   }
 
-  List<String> _extractLanguages(List<LessonWithProgress> items) {
-    final langs = <String>{};
-    for (final item in items) {
-      langs.add(SubtitleModeX.resolveLanguageCode(item.lesson.language));
+  /// 语文在线课程库入口（黑白极简正方形按钮，置于标签栏右侧）
+  Widget _buildSquareOnlineCatalogCard(BuildContext context) {
+    final ll = context.ll;
+    return Tooltip(
+      message: '语文课程库',
+      child: InkWell(
+        key: const Key('online-catalog-button'),
+        onTap: () =>
+            _openCloudCatalog(_searchQuery.isNotEmpty ? _searchQuery : null),
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
+          width: 44,
+          height: 36,
+          padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+          decoration: BoxDecoration(
+            color: ll.surface,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: ll.divider.withValues(alpha: 0.8),
+              width: 0.8,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.auto_stories_outlined,
+                color: ll.textPrimary,
+                size: 16,
+              ),
+              const SizedBox(height: 1),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '课程库',
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w600,
+                    color: ll.textPrimary,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// AI 英语听说实验舱 · 创意区入口横幅（黑白极简风格）
+  Widget _buildSpeakingSandboxBanner(BuildContext context) {
+    final ll = context.ll;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LLSpacing.xl,
+        LLSpacing.xs,
+        LLSpacing.xl,
+        LLSpacing.sm,
+      ),
+      child: InkWell(
+        key: const Key('ai-speaking-sandbox-banner'),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => AiSpeakingSandboxScreen(
+                aiGovernorService: _aiGovernorService,
+                vocabularyStore: _vocabularyStore,
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: ll.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: ll.divider, width: 0.9),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: ll.textPrimary.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: ll.textPrimary.withValues(alpha: 0.15),
+                    width: 0.8,
+                  ),
+                ),
+                child: Icon(
+                  Icons.auto_awesome,
+                  color: ll.textPrimary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'AI 英语听说实验舱',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: ll.textPrimary,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: ll.textPrimary.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '创意区',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: ll.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'AI 生成情境 · 地道母语润色 · 连读失爆深度拆解',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: ll.textTertiary,
+                        height: 1.2,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 13,
+                color: ll.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 中文导图搜索跨直达药丸栏
+  Widget _buildChineseSearchJumpBar(BuildContext context) {
+    final ll = context.ll;
+    final results = PrimaryChineseCurriculum.search(_searchQuery);
+    if (results.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LLSpacing.xl,
+        0,
+        LLSpacing.xl,
+        LLSpacing.xs,
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: ll.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: ll.divider, width: 0.8),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.near_me_outlined, size: 14, color: ll.textSecondary),
+            const SizedBox(width: 6),
+            Text(
+              '导图直达 ()：',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: ll.textSecondary,
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final lesson in results)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InkWell(
+                          onTap: () {
+                            _updateChineseGrade(
+                              grade: lesson.grade,
+                              term: lesson.term,
+                            );
+                            setState(() {
+                              _searchQuery = lesson.displayTitle;
+                              _searchController.text = lesson.displayTitle;
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: (_chineseSelectedGrade == lesson.grade &&
+                                      _chineseSelectedTerm == lesson.term)
+                                  ? ll.textPrimary
+                                  : ll.textPrimary.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              ' · ',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: (_chineseSelectedGrade == lesson.grade &&
+                                        _chineseSelectedTerm == lesson.term)
+                                    ? ll.bg
+                                    : ll.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 中文与分册控制栏（支持记忆选择、一键锁定常用，黑白极简）
+  Widget _buildChineseGradeHeader(BuildContext context) {
+    final ll = context.ll;
+    const grades = [
+      (1, '一'),
+      (2, '二'),
+      (3, '三'),
+      (4, '四'),
+      (5, '五'),
+      (6, '六'),
+      (7, '七'),
+      (8, '八'),
+      (9, '九'),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LLSpacing.xl,
+        LLSpacing.xs,
+        LLSpacing.xl,
+        LLSpacing.xs,
+      ),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: ll.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: ll.divider, width: 0.8),
+        ),
+        child: _isChineseGradeLocked
+            ? Row(
+                children: [
+                  Icon(Icons.push_pin_rounded, size: 14, color: ll.textPrimary),
+                  const SizedBox(width: 8),
+                  // 360dp 下这一行原本三段都不可缩容，实测内容 302px > 容器 284px
+                  // 直接出红条（doc 21 §五）。"我的："与右侧"已锁定"徽标重复，
+                  // 去掉前缀后 382dp 真机上标题不再被截成"我的…"。
+                  Flexible(
+                    child: Text(
+                      '$_chineseSelectedGrade  · $_chineseSelectedTerm',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: LLText.cardTitle.copyWith(color: ll.textPrimary),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: ll.emphasis,
+                      borderRadius: BorderRadius.circular(LLRadius.xsmall),
+                    ),
+                    child: Text(
+                      '已锁定',
+                      style: LLText.badge.copyWith(
+                        color: ll.textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  InkWell(
+                    onTap: () => _updateChineseGrade(locked: false),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.swap_horiz_rounded, size: 14, color: ll.textSecondary),
+                          const SizedBox(width: 3),
+                          Text(
+                            '更换',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: ll.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 1. 1 到 9 横向微型药丸选择器
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (final (g, name) in grades) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: InkWell(
+                              onTap: () => _updateChineseGrade(grade: g),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _chineseSelectedGrade == g
+                                      ? ll.textPrimary
+                                      : ll.textPrimary.withValues(alpha: 0.04),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _chineseSelectedGrade == g
+                                        ? ll.textPrimary
+                                        : ll.divider,
+                                    width: 0.6,
+                                  ),
+                                ),
+                                child: Text(
+                                  name,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: _chineseSelectedGrade == g
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                    color: _chineseSelectedGrade == g
+                                        ? ll.bg
+                                        : ll.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // 2. 分册切换与锁定按钮
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: ll.textPrimary.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '语文',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: ll.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // 上册 / 下册药丸切换
+                      Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: ll.textPrimary.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: ll.divider, width: 0.6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final term in ['上册', '下册'])
+                              GestureDetector(
+                                key: Key(term == '上册' ? 'wheel-shangce' : 'wheel-xiace'),
+                                onTap: () => _updateChineseGrade(term: term),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _chineseSelectedTerm == term
+                                        ? ll.surface
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(6),
+                                    boxShadow: _chineseSelectedTerm == term
+                                        ? [
+                                            BoxShadow(
+                                              color: Colors.black
+                                                  .withValues(alpha: 0.05),
+                                              blurRadius: 3,
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                  child: Text(
+                                    term,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: _chineseSelectedTerm == term
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
+                                      color: _chineseSelectedTerm == term
+                                          ? ll.textPrimary
+                                          : ll.textTertiary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const Spacer(),
+                      // 设为我的（锁定）
+                      InkWell(
+                        onTap: () {
+                          _updateChineseGrade(locked: true);
+                          ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '已将 $_chineseSelectedGrade · $_chineseSelectedTerm 设为默认',
+                                ),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.push_pin_outlined,
+                                size: 13,
+                                color: ll.textPrimary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '锁定为我的',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: ll.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  /// 点击思维导图上的课文：秒进精听播放
+  Future<void> _openChineseLessonFromMindMap(PrimaryChineseLesson lesson) async {
+    final clean = lesson.displayTitle;
+    final items = _items ?? [];
+    LessonWithProgress? match;
+
+    // 1. 若具有确定的 lessonId，必须【绝对优先】且【仅按】lessonId 精确匹配
+    if (lesson.lessonId != null) {
+      for (final item in items) {
+        if (item.lesson.id == lesson.lessonId) {
+          match = item;
+          break;
+        }
+      }
     }
-    final sorted = langs.toList()..sort();
-    return ['ALL', ...sorted];
+
+    // 2. 仅在未配置 lessonId 时，才退化为标题匹配，但泛用短标题绝不允许跨单元模糊匹配
+    if (match == null && lesson.lessonId == null) {
+      const genericNames = {'识字加油站', '字词句运用', '日积月累', '我爱阅读', '书写提示', '和大人一起读'};
+      for (final item in items) {
+        final t = item.lesson.title;
+        if (!genericNames.contains(clean)) {
+          if (t == lesson.title || t == lesson.fullTitle || t.contains(clean)) {
+            match = item;
+            break;
+          }
+        } else {
+          if (t == lesson.title || t == lesson.fullTitle) {
+            match = item;
+            break;
+          }
+        }
+      }
+    }
+
+    if (match != null) {
+      await _openLesson(match);
+      return;
+    }
+
+    // 3. 若本地未导入但已配置云端 lessonId：秒速直接从云端下载并立即自动秒进播放！
+    if (lesson.lessonId != null) {
+      final messenger = ScaffoldMessenger.of(context);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                Text('正在从云端加载《${lesson.numberedTitle()}》...'),
+              ],
+            ),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+
+      try {
+        final downloadUrl = 'http://123.57.84.97:3100/courses/${lesson.lessonId}.lllesson';
+        final res = await http.get(Uri.parse(downloadUrl)).timeout(const Duration(seconds: 15));
+        if (res.statusCode == 200) {
+          final tempDir = await getTemporaryDirectory();
+          final tempFile = File(p.join(tempDir.path, 'quick_${lesson.lessonId}.lllesson'));
+          await tempFile.writeAsBytes(res.bodyBytes);
+
+          final package = await LessonPackageReader.read(tempFile.path);
+          final imported = await widget.repository.importPackage(package);
+          await _reload();
+
+          messenger.hideCurrentSnackBar();
+          if (mounted) {
+            await _openLesson(LessonWithProgress(lesson: imported, progress: null));
+          }
+          return;
+        }
+      } catch (e) {
+        // 下载失败或无网络，平滑降级进入课程库对应分册
+      }
+    }
+
+    // 4. 若未录入或下载失败，直接定位打开课程库对应年级分册（绝不传 generic 短词做全局搜索）
+    _openCloudCatalog(null, lesson.grade, lesson.term);
+  }
+
+  /// 全局课程搜索（置于课程页面顶部）。
+  /// 按标题/系列名过滤，实时生效。
+  Widget _buildSearchField(BuildContext context) {
+    final ll = context.ll;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LLSpacing.xl,
+        LLSpacing.xs,
+        LLSpacing.xl,
+        LLSpacing.sm,
+      ),
+      child: TextField(
+        controller: _searchController,
+        style: TextStyle(fontSize: 13, color: ll.textPrimary),
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: '', // 2026-10-20 郭老师：搜索框灰色提示字是废话，删掉
+          hintStyle: TextStyle(fontSize: 13, color: ll.textTertiary),
+          prefixIcon: Icon(Icons.search, size: 18, color: ll.textTertiary),
+          suffixIcon: _searchQuery.isEmpty
+              ? null
+              : IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(Icons.close, size: 16, color: ll.textTertiary),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                ),
+          filled: true,
+          fillColor: ll.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: ll.divider),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: ll.divider),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 8,
+          ),
+        ),
+        onChanged: (value) => setState(() => _searchQuery = value),
+        onSubmitted: (value) {
+          final isZh = _selectedLanguage == 'ZH';
+          if (isZh && value.trim().isNotEmpty) {
+            final matches = PrimaryChineseCurriculum.search(value);
+            if (matches.isNotEmpty) {
+              final first = matches.first;
+              _updateChineseGrade(grade: first.grade, term: first.term);
+              setState(() {
+                _searchQuery = first.displayTitle;
+                _searchController.text = first.displayTitle;
+              });
+            }
+          }
+        },
+      ),
+    );
+  }
+
+  List<String> _extractLanguages(List<LessonWithProgress> items) {
+    final langs = <String>{'EN', 'ZH'};
+    for (final item in items) {
+      final code = SubtitleModeX.resolveLanguageCode(item.lesson.language);
+      if (code.isNotEmpty) langs.add(code);
+    }
+    final others = langs.where((l) => l != 'ZH' && l != 'EN').toList()..sort();
+    return ['EN', 'ZH', ...others];
   }
 
   Widget _buildCreationBanner(BuildContext context) {
@@ -848,17 +1639,22 @@ class LibraryScreenState extends State<LibraryScreen> {
     return const SizedBox.shrink();
   }
 
-  /// 生词本入口（Library 二级）。
+  /// 「词汇记忆」双卡区块（14 号 §三）：生词本 | 闪卡复习。
   ///
-  /// 只在**已有生词**时出现：空生词本不该在课程列表上占一行
-  /// （新用户的第一条引导在积累模式的提示里）。行上直接给出
-  /// 「候选 / 今日待练」两个数字，不必点进去才能看出有没有事要做。
+  /// 只在已有生词时出现。生词本卡给「候选 / 今日待练」计数；闪卡复习卡
+  /// 给「待复习 N 张」徽标（与复习页队列同口径：FSRS 到期 + 新卡配额），
+  /// 零到期时弱态「今日复习已完成」。两卡路由分离；复习与生词本页内
+  /// 快捷入口同一路由（两处都留）。
   Widget _buildVocabularyEntry(BuildContext context) {
     final store = _vocabularyStore;
     if (store.itemCount == 0) return const SizedBox.shrink();
-    final ll = context.ll;
-    final s = LLStrings.of(context);
     final plan = const VocabularyPlanner().build(store.items);
+    final dueCount = const VocabularyReviewQueue().build(store.items).length;
+    final reviewable = store.items.any(
+      (it) =>
+          it.status == VocabularyStatus.learning ||
+          it.status == VocabularyStatus.known,
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -867,55 +1663,121 @@ class LibraryScreenState extends State<LibraryScreen> {
         LLSpacing.xl,
         LLSpacing.sm,
       ),
-      child: InkWell(
-        key: const Key('vocabulary-entry'),
-        onTap: _openVocabularyBook,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: ll.surface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: ll.divider),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.bookmark_border_rounded,
-                size: 17,
-                color: ll.textSecondary,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: _vocabEntryCard(
+                context,
+                key: const Key('vocabulary-entry'),
+                icon: Icons.bookmark_border_rounded,
+                title: LLStrings.of(context).vocabBook,
+                subtitle: plan.isEmpty
+                    ? LLStrings.of(
+                        context,
+                      ).vocabCandidateCount(store.candidateCount)
+                    : '${LLStrings.of(context).vocabCandidateCount(store.candidateCount)} · '
+                          '${LLStrings.of(context).vocabTodayPlan} ${plan.length}',
+                onTap: _openVocabularyBook,
               ),
-              const SizedBox(width: 10),
+            ),
+            if (reviewable) ...[
+              const SizedBox(width: LLSpacing.sm),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      s.vocabBook,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: ll.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      plan.isEmpty
-                          ? s.vocabCandidateCount(store.candidateCount)
-                          : '${s.vocabCandidateCount(store.candidateCount)} · '
-                                '${s.vocabTodayPlan} ${plan.length}',
-                      style: TextStyle(fontSize: 11.5, color: ll.textTertiary),
-                    ),
-                  ],
+                child: _vocabEntryCard(
+                  context,
+                  key: const Key('review-entry'),
+                  icon: Icons.style_rounded,
+                  title: LLStrings.of(context).reviewEntryTitle,
+                  subtitle: dueCount > 0
+                      ? LLStrings.of(context).reviewEntryDue(dueCount)
+                      : LLStrings.of(context).reviewEntryDone,
+                  dimmed: dueCount == 0,
+                  onTap: _openFlashcardReview,
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: ll.textTertiary,
-              ),
             ],
-          ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 「词汇记忆」区块的单张卡片（14 号 §四：紧凑二级区块，
+  /// 视觉权重低于「继续精听」核心 CTA）。
+  Widget _vocabEntryCard(
+    BuildContext context, {
+    required Key key,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    bool dimmed = false,
+    required VoidCallback onTap,
+  }) {
+    final ll = context.ll;
+    return InkWell(
+      key: key,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: ll.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: ll.divider),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 17,
+              color: dimmed ? ll.textTertiary : ll.textSecondary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: dimmed ? ll.textSecondary : ll.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: dimmed ? ll.textTertiary : ll.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: ll.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 闪卡复习 —— 与生词本页内快捷入口进入**同一个**复习页
+  /// （14 号 §三：两入口零语义差异，队列同一份）。
+  Future<void> _openFlashcardReview() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VocabularyReviewScreen(
+          store: _vocabularyStore,
+          onOpenOccurrence: _openVocabularyOccurrence,
+          aiGovernorService: _aiGovernorService,
         ),
       ),
     );
@@ -994,7 +1856,9 @@ class LibraryScreenState extends State<LibraryScreen> {
           initialRepeatTarget: progress?.repeatTarget ?? 1,
           initialPlaybackRate: progress?.playbackRate ?? 1.0,
           initialSubtitleMode: progress?.subtitleMode,
-          initialPageMode: progress?.displayMode == 'page',
+          initialPageMode: progress?.displayMode != null
+              ? (progress!.displayMode == 'page')
+              : null,
         ),
       ),
     );
@@ -1120,11 +1984,13 @@ class LibraryScreenState extends State<LibraryScreen> {
           }
         },
       );
-      final saved = await FilePicker.platform.saveFile(
+      await shareApkgBytes(
         fileName: 'listenloop_legacy_cards.apkg',
         bytes: Uint8List.fromList(bytes),
+        shareSubject: '句读 挖卡卡组',
+        shareText: '句读 历史挖卡导出的 .apkg，可导入 Anki 桌面端复习。',
       );
-      if (saved == null || !mounted) return;
+      if (!mounted) return;
 
       final clear = await showDialog<bool>(
         context: context,
@@ -1177,8 +2043,11 @@ class LibraryScreenState extends State<LibraryScreen> {
       ),
       child: Row(
         children: [
+          // 产品名 2026-10-10 定为「句读(Phrasing)」。首页 wordmark 与启动页、
+          // 设置页卷首保持一致：中文主标「句读」，英文侧（uiLanguage=en）用 Phrasing。
+          // （2026-10-16 修：此前首页硬编码 'ListenLoop'，是改名漏网的一处。）
           Text(
-            'ListenLoop',
+            s.appWordmark,
             style: LLText.appTitle.copyWith(color: ll.textPrimary),
           ),
           const Spacer(),
@@ -1228,25 +2097,153 @@ class LibraryScreenState extends State<LibraryScreen> {
       }
     }
 
+    final isChineseTab = _selectedLanguage == 'ZH';
+
     final continueTarget = continueItem;
-    final showContinue =
-        continueTarget != null &&
-        (_selectedLanguage == 'ALL' ||
-            SubtitleModeX.resolveLanguageCode(continueTarget.lesson.language) ==
-                _selectedLanguage);
 
-    final filteredItems = [
-      for (final item in items)
-        if (_selectedLanguage == 'ALL' ||
-            SubtitleModeX.resolveLanguageCode(item.lesson.language) ==
-                _selectedLanguage)
-          item,
-    ];
+    final query = _searchQuery.trim().toLowerCase();
+    bool matchesQuery(LessonWithProgress item) {
+      if (query.isEmpty) return true;
+      return item.lesson.title.toLowerCase().contains(query) ||
+          (item.lesson.series ?? '').toLowerCase().contains(query);
+    }
 
-    final others = [
-      for (final item in filteredItems)
-        if (!showContinue || item != continueTarget) item,
-    ];
+    bool isCurriculumLesson(LessonWithProgress item) {
+      final s = item.lesson.series ?? '';
+      final t = item.lesson.title;
+      if (s.contains('统编') || s.contains('语文') || s.contains('小学语文')) return true;
+      if (t.contains('统编语文')) return true;
+      return false;
+    }
+
+    final filteredItems = items.where((item) {
+      if (!matchesQuery(item)) return false;
+      final langCode = SubtitleModeX.resolveLanguageCode(item.lesson.language);
+      if (isChineseTab) {
+        // 中文模式：只放用户自己导进去的中文材料，绝对不重复展示统编版教材卡片
+        return langCode == 'ZH' && !isCurriculumLesson(item);
+      } else if (_selectedLanguage == 'EN') {
+        // 英文模式：只放英文课程与用户导进去的英文内容
+        return langCode == 'EN';
+      } else if (_selectedLanguage == 'ALL') {
+        return true;
+      } else {
+        return langCode == _selectedLanguage;
+      }
+    }).toList();
+
+    if (filteredItems.isEmpty) {
+      if (isChineseTab) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+            child: Text(
+              '暂无导入的个人中文内容\n上方「语文」中可直接点击收听各课',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12.5,
+                color: ll.textTertiary,
+                height: 1.6,
+              ),
+            ),
+          ),
+        );
+      }
+      return _EmptyLibrary(
+        onImport: _onImportPressed,
+        onOpenCatalog: () => _openCloudCatalog(),
+        onCreate: _openCreationScreen,
+      );
+    }
+
+    // 系列分组（2026-09-29 课文朗读系列）：同一 series 归组，搜索时全部平铺。
+    final seriesGroups = <String, List<LessonWithProgress>>{};
+    final loose = <LessonWithProgress>[];
+    for (final item in filteredItems) {
+      final seriesName = item.lesson.series;
+      if (query.isEmpty && seriesName != null && seriesName.isNotEmpty) {
+        seriesGroups.putIfAbsent(seriesName, () => []).add(item);
+      } else {
+        loose.add(item);
+      }
+    }
+    final others = loose;
+    final expandedSeries = _expandedSeries;
+    List<Widget> seriesSectionWidgets() => [
+          for (final entry in seriesGroups.entries)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                LLSpacing.xl, 0, LLSpacing.xl, LLSpacing.sm,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    InkWell(
+                      onTap: () => setState(() {
+                        if (!expandedSeries.remove(entry.key)) {
+                          expandedSeries.add(entry.key);
+                        }
+                      }),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: ll.surface,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: ll.divider),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.menu_book_outlined, size: 18,
+                                color: ll.textPrimary),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                entry.key,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: ll.textPrimary,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '${entry.value.length} 课',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: ll.textTertiary,
+                              ),
+                            ),
+                            Icon(
+                              expandedSeries.contains(entry.key)
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              size: 18,
+                              color: ll.textTertiary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (expandedSeries.contains(entry.key))
+                      for (var i = 0; i < entry.value.length; i++)
+                        LessonEditorialRow(
+                          key: Key(
+                              'lesson-card-${entry.value[i].lesson.id}'),
+                          index: i,
+                          item: entry.value[i],
+                          onTap: () => _openLesson(entry.value[i]),
+                          onLongPress: () =>
+                              _showLessonMenu(entry.value[i]),
+                        ),
+                  ],
+                ),
+              ),
+            ),
+        ];
 
     return CustomScrollView(
       slivers: [
@@ -1272,46 +2269,38 @@ class LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
         ),
-        if (showContinue) ...[
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(
-              LLSpacing.xl,
-              LLSpacing.xl,
-              LLSpacing.xl,
-              0,
-            ),
-            sliver: SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    s.continueLearning,
-                    style: LLText.sectionLabel.copyWith(color: ll.textTertiary),
-                  ),
-                  const SizedBox(height: LLSpacing.md),
-                  LessonContinueCard(
-                    key: const Key('continue-card'),
-                    item: continueTarget,
-                    onTap: () => _openLesson(continueTarget),
-                    onLongPress: () => _showLessonMenu(continueTarget),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ...seriesSectionWidgets(),
         if (others.isNotEmpty) ...[
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(
               LLSpacing.xl,
-              LLSpacing.xxl,
+              LLSpacing.lg,
               LLSpacing.xl,
               LLSpacing.sm,
             ),
             sliver: SliverToBoxAdapter(
-              child: Text(
-                s.allLessons,
-                style: LLText.sectionLabel.copyWith(color: ll.textTertiary),
+              child: Row(
+                children: [
+                  Text(
+                    '我的导入与自建',
+                    style: LLText.sectionLabel.copyWith(color: ll.textTertiary),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 1.5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: ll.textPrimary.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${others.length}',
+                      style: TextStyle(fontSize: 10, color: ll.textTertiary),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1359,7 +2348,7 @@ class LibraryScreenState extends State<LibraryScreen> {
                 ),
               ),
             ),
-        ] else if (!showContinue) ...[
+        ] else if (others.isEmpty && seriesGroups.isEmpty) ...[
           SliverPadding(
             padding: const EdgeInsets.all(LLSpacing.xxl),
             sliver: SliverToBoxAdapter(
@@ -1381,50 +2370,58 @@ class LibraryScreenState extends State<LibraryScreen> {
 }
 
 class _EmptyLibrary extends StatelessWidget {
-  const _EmptyLibrary({required this.onImport});
+  const _EmptyLibrary({
+    required this.onImport,
+    this.onOpenCatalog,
+    this.onCreate,
+  });
 
   final VoidCallback onImport;
+  final VoidCallback? onOpenCatalog;
+  final VoidCallback? onCreate;
 
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
     final s = LLStrings.of(context);
     return Center(
-      child: Column(
-        key: const Key('empty-state'),
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          LLMark(size: 56, color: ll.textTertiary),
-          const SizedBox(height: LLSpacing.lg),
-          Text(
-            s.noLessonsTitle,
-            style: LLText.rowTitle.copyWith(color: ll.textPrimary),
-          ),
-          const SizedBox(height: LLSpacing.sm),
-          Text(
-            s.noLessonsBody,
-            style: LLText.caption.copyWith(color: ll.textTertiary),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: LLSpacing.xl),
-          OutlinedButton(
-            onPressed: onImport,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: ll.textPrimary,
-              side: BorderSide(color: ll.textPrimary),
-              shape: const StadiumBorder(),
-              padding: const EdgeInsets.symmetric(
-                horizontal: LLSpacing.xl,
-                vertical: LLSpacing.md,
-              ),
-              textStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: LLSpacing.xl),
+        child: Column(
+          key: const Key('empty-state'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LLMark(size: 56, color: ll.textTertiary),
+            const SizedBox(height: LLSpacing.lg),
+            Text(
+              s.noLessonsTitle,
+              style: LLText.rowTitle.copyWith(color: ll.textPrimary),
             ),
-            child: Text(s.importLesson),
-          ),
-        ],
+            const SizedBox(height: LLSpacing.lg),
+            // 2026-10-16 修两处：
+            // ① 「制作新课程」此前硬编码中文 → 英文界面下走 i18n（New Lesson）；
+            // ② 两个按钮并排，窄屏/大字号下会顶出 Row（实测英文界面报
+            //    "RIGHT OVERFLOWED BY 26 PIXELS"）→ 用 Wrap 自动换行，
+            //    放得下时行为与原来的 Row 完全一致。
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: LLSpacing.sm,
+              runSpacing: LLSpacing.sm,
+              children: [
+                OutlinedButton(
+                  onPressed: onImport,
+                  child: Text(s.importLesson),
+                ),
+                if (onCreate != null)
+                  FilledButton.icon(
+                    onPressed: onCreate,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: Text(s.createNewLesson),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1580,62 +2577,8 @@ class _DynamicAiGovernorCard extends StatelessWidget {
       );
     }
 
-    // When no weaknesses: show 尚雯婕 3-minute sprint card
-    return Container(
-      margin: const EdgeInsets.only(bottom: LLSpacing.md),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: ll.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ll.divider, width: 1),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: ll.textPrimary.withValues(alpha: 0.08),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.flash_on, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '尚雯婕 3 分钟限时精听法',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: ll.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '学完即测 3 题，以测代练，专克听力盲区。',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: ll.textTertiary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: onStartChallenge,
-            child: const Text('开始 →', style: TextStyle(fontSize: 12)),
-          ),
-        ],
-      ),
-    );
+    // When no weaknesses: return empty widget
+    return const SizedBox.shrink();
   }
 }
 

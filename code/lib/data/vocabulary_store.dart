@@ -176,6 +176,31 @@ class VocabularyStore extends ChangeNotifier {
   }) =>
       _findOccurrence(lessonId, sentenceId, charStart, charEnd) != null;
 
+  /// **P2 非破坏式已知词反哺**：该归一化词形是否已被用户标记为「已掌握」。
+  ///
+  /// 供字幕层做视觉弱化（只改颜色，不删内容）。口径与
+  /// [itemBySurface] 一致（lemma 键 → phrase 键 → 归一化原形兜底），
+  /// 但**只看 `status == known`** —— candidate / learning / ignored 都不算。
+  ///
+  /// 与 08 号红线的边界：本方法只回答「已知与否」，**不参与任何
+  /// 内容过滤、排序或队列构成**；已知词是否出现在字幕里由句子本身
+  /// 决定，与这里无关。
+  bool isKnownSurface(String surface) {
+    final normalized = normalizeTerm(surface);
+    final wordKey = lemmaKey(normalized);
+    final phraseKey = 'p:$normalized';
+    VocabularyItem? fallback;
+    for (final item in _items.values) {
+      if (item.status != VocabularyStatus.known) continue;
+      if (item.itemKey == wordKey) return true;
+      if (fallback == null &&
+          (item.itemKey == phraseKey || item.itemKey == normalized)) {
+        fallback = item;
+      }
+    }
+    return fallback != null;
+  }
+
   /// 保存一次上下文证据（幂等）。
   ///
   /// 已存在同一位置的证据时直接返回既有词条，**不重复生成**。
@@ -448,6 +473,59 @@ class VocabularyStore extends ChangeNotifier {
     _occurrenceSeq = 0;
     notifyListeners();
     _schedulePersist();
+  }
+
+  // ------------------------------------------------------------ L2 导入
+
+    /// 导入一条来自备份的完整词条（L2 数据恢复）。
+  ///
+  /// 调用方负责先按 lemma 判重（[itemBySurface]）；本方法只保证：
+  ///   * id 不撞车（与既有 id 冲突时换新 id，避免覆盖本机词条）；
+  ///   * 自增游标顺延到最大，后续新建不会撞上导入的 id；
+  ///   * 自动落盘 + 通知订阅者。
+  VocabularyItem addImported(VocabularyItem incoming) {
+    final id = _items.containsKey(incoming.id) ? 'voc_${++_itemSeq}' : incoming.id;
+    final item = _cloneWithId(incoming, id);
+    _items[item.id] = item;
+    _bumpCountersFrom(item);
+    notifyListeners();
+    _schedulePersist();
+    return item;
+  }
+
+  /// 复制一条词条并替换 id（copyWith 不接受 id）。
+  VocabularyItem _cloneWithId(VocabularyItem src, String id) =>
+      VocabularyItem(
+        id: id,
+        surfaceForm: src.surfaceForm,
+        kind: src.kind,
+        status: src.status,
+        englishDefinition: src.englishDefinition,
+        chineseGloss: src.chineseGloss,
+        aiUsageNote: src.aiUsageNote,
+        lemma: src.lemma,
+        createdAt: src.createdAt,
+        lastSeenAt: src.lastSeenAt,
+        occurrences: src.occurrences,
+        drills: src.drills,
+        ankiCardIds: src.ankiCardIds,
+        srs: src.srs,
+      );
+
+  /// 把某词条的 id / occurrence id 纳入自增游标，避免下次新建撞车。
+  void _bumpCountersFrom(VocabularyItem item) {
+    final itemMatch = RegExp(r'^voc_(\d+)$').firstMatch(item.id);
+    if (itemMatch != null) {
+      final n = int.parse(itemMatch.group(1)!);
+      if (n > _itemSeq) _itemSeq = n;
+    }
+    for (final o in item.occurrences) {
+      final om = RegExp(r'^occ_(\d+)$').firstMatch(o.id);
+      if (om != null) {
+        final n = int.parse(om.group(1)!);
+        if (n > _occurrenceSeq) _occurrenceSeq = n;
+      }
+    }
   }
 
   // ------------------------------------------------------------ 序列化

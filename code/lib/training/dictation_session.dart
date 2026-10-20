@@ -206,6 +206,13 @@ class DictationSession extends ChangeNotifier {
     return keys.map((k) => _results[k]!).toList(growable: false);
   }
 
+  /// 已完成段落的结果映射：段序号 → 段结果。
+  ///
+  /// 与 [completedResults] 同源但保留段序号，供上层（如「意思回忆」入口）
+  /// 反推某句在整课中的绝对下标。
+  Map<int, DictationSegmentResult> get completedSegmentResults =>
+      Map<int, DictationSegmentResult>.unmodifiable(_results);
+
   /// 整课训练进度（已完成批改的段数 / 总段数）。
   double get trainingProgress =>
       segmentCount == 0 ? 0 : _results.length / segmentCount;

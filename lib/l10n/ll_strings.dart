@@ -1,0 +1,774 @@
+import 'package:flutter/widgets.dart';
+
+import '../creation/creation_errors.dart';
+import '../creation/lesson_job_stage.dart';
+import '../lesson/lesson_package_exception.dart';
+import '../preferences/app_preferences.dart';
+
+/// Minimal hand-rolled UI copy table (follow-up: 中/英界面切换).
+///
+/// Deliberately NOT flutter_localisations codegen — the surface is small and
+/// the brand voice is part of the design. The wordmark 句读 / Phrasing and
+/// font names (Sans/Serif/System) stay untranslated in both languages.
+class LLStrings {
+  const LLStrings(this.uiLanguage);
+
+  final AppLanguage uiLanguage;
+
+  static LLStrings of(BuildContext context) =>
+      LLStrings(PreferencesScope.maybeOf(context).uiLanguage);
+
+  bool get _isZh => uiLanguage == AppLanguage.chinese;
+
+  /// 界面语言判定（供新页面复用，避免各自硬编码中英判断）。
+  bool get isZh => _isZh;
+
+  /// 产品 wordmark（首页 / 顶栏）。2026-10-10 定名「句读 / Phrasing」，
+  /// 中文界面主标「句读」、英文界面用 `Phrasing`——与启动页揭幕、设置页卷首同口径。
+  /// 品牌名不参与翻译，只按界面语言二选一。
+  String get appWordmark => _isZh ? '句读' : 'Phrasing';
+
+  // -------------------------------------------------------------- vocab ----
+  // 生词本（附属层）：入口开在三级。文案遵循 10 号文档红线 ——
+  // 点词只「存」不「查」；释义必须由用户第二个主动动作打开。
+  String get more => _isZh ? '更多' : 'More';
+  String get vocabAccumulation => _isZh ? '生词积累模式' : 'Vocabulary mode';
+  String get vocabAccumulationHint => _isZh
+      ? '开启后字幕逐词可点：点一下存入候选，再点取消。不暂停、不弹释义'
+      : 'Tap words to collect them; tap again to remove. Playback never stops';
+  String get vocabSaved => _isZh ? '已存' : 'Saved';
+  String get vocabPhraseHint => _isZh
+      ? '长按拖动还能圈短语（2–5 个词），如 take off'
+      : 'Long-press and drag to collect a phrase (2–5 words), e.g. take off';
+  String get vocabRemoved => _isZh ? '已取消' : 'Removed';
+
+  // P2 非破坏式已知词反哺（08 号红线：只弱化视觉，不删内容）
+  String get vocabKnownWordsHighlight => _isZh ? '已知词淡化' : 'Dim known words';
+  String get vocabKnownWordsHighlightHint => _isZh
+      ? '已掌握的词会变淡（仅颜色），完整保留显示与点击'
+      : 'Known words fade (colour only); they stay fully visible and tappable';
+
+  String vocabCandidateCount(int count) =>
+      _isZh ? '候选池 $count 个词' : '$count candidates';
+
+  // 14 号：闪卡复习入口（首页「词汇记忆」双卡区块）
+  String get reviewEntryTitle => _isZh ? '闪卡复习' : 'Flashcard review';
+  String reviewEntryDue(int count) =>
+      _isZh ? '待复习 $count 张' : '$count due';
+  String get reviewEntryDone =>
+      _isZh ? '今日复习已完成' : 'Review done for today';
+
+  // 15 号 Phase A 第一优先：Meaning Recall
+  String get mrTitle => _isZh ? '意思回忆' : 'Meaning Recall';
+  String get mrPromptTitle => _isZh ? '这句话的意思是……' : 'The meaning is…';
+  String get mrPrompt => _isZh
+      ? '用英语表达这句话的意思，不要求和原句一样'
+      : 'Express this meaning in English (your own words are fine)';
+  String get mrHint => _isZh
+      ? '用你自己的英语表达这个意思……'
+      : 'Express this meaning in your own English…';
+  String get mrSubmit => _isZh ? '提交' : 'Submit';
+  String get mrFeedbackTitle => _isZh ? 'AI 反馈' : 'AI Feedback';
+  String get mrOriginalLabel => _isZh ? '原句' : 'Original';
+  /// 听写完成流入口：批改后把错句接进「意思回忆」。
+  String get mrDrillTitle => _isZh ? '错句练习' : 'Drill mistakes';
+  String get mrDrillEmpty => _isZh ? '没有需要打磨的错句' : 'Nothing to polish';
+  String get mrDrillHint => _isZh
+      ? '这些是听写批改里对齐可靠、有错的句子；留空句与对齐不可靠的句子会留在听写里重听，不进这里。'
+      : 'Reliably-aligned mistakes from your dictation. Blanks and unreliable lines stay in dictation.';
+  String get mrDrillNext => _isZh ? '下一句' : 'Next';
+  String get mrDrillPrev => _isZh ? '上一句' : 'Previous';
+  String get mrDrillDone => _isZh ? '完成练习' : 'Finish';
+
+  /// 听写完成流入口：页脚常驻次级入口文案。
+  String mrDrillEntry(int count) =>
+      _isZh ? '$count 句有待打磨 → 去意思回忆' : '$count to polish → meaning recall';
+
+  /// ListenRetryTarget 出口（v0.9.1）：留空/对齐不可靠句 → 回原声重听。
+  String dictationRelistenEntry(int count) =>
+      _isZh ? '$count 句还没听清 → 回原声重听' : '$count unclear → listen again';
+
+  /// Meaning Recall modified output（v0.9.1）：反馈后再答一次的引导语。
+  String get mrRetryPrompt => _isZh
+      ? '意思基本表达到了。根据反馈，这次把目标词用上，再说一次：'
+      : 'Close enough. Now retry using the target word(s):';
+
+  String get mrRetryButton => _isZh ? '再说一次' : 'Try again';
+
+  String get mrRetryUsed => _isZh
+      ? '已重答一次。可对照参考表达后进入下一句。'
+      : 'One retry used. Compare with the reference and move on.';
+
+  String get mrSeeReference => _isZh ? '看参考表达' : 'Show reference';
+
+  /// 队列进度：第 N / 总 M 句。
+  String mrDrillCount(int current, int total) =>
+      _isZh ? '第 $current / $total 句' : 'Sentence $current / $total';
+
+  // 生词本管理页（Library 二级）。枚举一律走 key 映射 —— l10n 不依赖模型层。
+
+  // 生词本管理页（Library 二级）。枚举一律走 key 映射 —— l10n 不依赖模型层。
+  String get vocabBook => _isZh ? '生词本' : 'Vocabulary';
+  String get vocabTodayPlan => _isZh ? '今日计划' : "Today's plan";
+  String get vocabAll => _isZh ? '全部' : 'All';
+  String get vocabEmpty => _isZh
+      ? '还没有生词。在精听页「更多」里开生词积累模式，点字幕里的词即可保存。'
+      : 'Nothing saved yet. Turn on Vocabulary mode under More in the listening page, then tap words.';
+  String get vocabNoItemsForFilter => _isZh ? '这一栏还是空的' : 'Nothing in this filter yet';
+  String get vocabTodayPlanEmpty => _isZh
+      ? '今天没有需要练的词 —— 只有出现听写错误、或已到复习期的词才会进入计划'
+      : 'Nothing to drill today — only words with dictation evidence or a due review enter the plan';
+  String get vocabEvidence => _isZh ? '上下文证据' : 'Evidence';
+  String get vocabReason => _isZh ? '依据' : 'Why';
+  String get vocabSuggest => _isZh ? '建议' : 'Suggested';
+  String get vocabOpenOriginal => _isZh ? '回原声' : 'Play original';
+  String get vocabLessonMissing =>
+      _isZh ? '这门课程已不在本机' : 'That lesson is no longer on this device';
+  String get vocabStartLearning => _isZh ? '加入学习' : 'Start learning';
+  String get vocabAiCheck => _isZh ? 'AI 检查是不是真的会' : 'AI check (do I really know it?)';
+  String get vocabExportApkg => _isZh ? '导出 Anki 卡组 (.apkg)' : 'Export Anki deck (.apkg)';
+  String get vocabExportEmpty => _isZh
+      ? '学习队列还是空的 —— 先把候选词加进来'
+      : 'Nothing to export yet — move candidates into the learning queue';
+  String vocabExportDone(int count) =>
+      _isZh ? '已导出 $count 张卡' : 'Exported $count cards';
+  String get vocabExportFailed => _isZh ? '导出失败，请重试' : 'Export failed, please retry';
+  String get dataBackupTooltip => _isZh ? '备份学习数据' : 'Back up learning data';
+  String get dataBackupDone => _isZh ? '备份已导出，可在分享面板选择保存位置' : 'Backup exported — choose a destination in the share sheet';
+  String get dataBackupFailed => _isZh ? '备份失败，请重试' : 'Backup failed, please retry';
+  String get dataBackupNoData => _isZh ? '还没有可备份的学习数据' : 'No learning data to back up yet';
+  String get dataImportTooltip => _isZh ? '导入备份' : 'Import backup';
+  String get dataImportDone => _isZh ? '备份已导入' : 'Backup imported';
+  String get dataImportFailed => _isZh ? '导入失败，请重试' : 'Import failed, please retry';
+  String get dataImportInvalid =>
+      _isZh ? '这个文件不是有效的句读备份' : 'This file is not a valid Phrasing backup';
+  String get dataImportVersionTooNew =>
+      _isZh ? '备份来自更新版本，请先升级应用再导入' : 'Backup is from a newer version — upgrade the app first';
+  String get dataImportNoItems =>
+      _isZh ? '备份里没有可导入的学习数据' : 'No learning data to import in this backup';
+  String dataImportPreview(int merged, int skipped) => _isZh
+      ? '将导入 $merged 个词条，跳过 $skipped 个本机已有的'
+      : 'Import $merged items, skip $skipped already on this device';
+  String get dataImportConfirmTitle => _isZh ? '导入备份' : 'Import backup';
+  String get dataImportConfirmBody => _isZh
+      ? '备份来自另一台设备。本机已有的词条会保留，只补充本机没有的。学习进度与 AI 卡片本次不恢复。'
+      : 'This backup came from another device. Items already on this device are kept; only missing ones are added. Progress and AI cards are not restored.';
+  String get dataImportConfirmMerge => _isZh ? '合并导入' : 'Merge';
+  String get dataImportConfirmOverwrite => _isZh ? '清空后导入' : 'Replace all';
+  String get dataImportOverwriteWarning => _isZh
+      ? '清空后导入会丢失本机现有的全部词条，确定？'
+      : 'Replace-all deletes every item currently on this device. Continue?';
+  String get legacyCardsClearedTitle => _isZh ? '导出完成' : 'Exported';
+  String get legacyCardsClearedBody => _isZh
+      ? '旧版闪卡已打包为 .apkg，可导入桌面版 Anki / AnkiDroid。是否清除本地旧数据？（新闪卡在生词本里，不受影响）'
+      : 'Legacy cards packed as .apkg — import it into Anki/AnkiDroid. Clear local legacy data? (The new flashcards in the vocabulary book are untouched.)';
+  String get legacyCardsClearYes => _isZh ? '清除旧数据' : 'Clear legacy data';
+  String get vocabMarkKnown => _isZh ? '标记已掌握' : 'Mark known';
+  String get vocabIgnore => _isZh ? '忽略' : 'Ignore';
+  String get vocabDelete => _isZh ? '删除词条' : 'Delete';
+  String get vocabRestore => _isZh ? '移回候选池' : 'Back to candidates';
+
+  /// 汇总条：三个数字一次说清。
+  String vocabSummary(int candidates, int learning, int known) => _isZh
+      ? '候选 $candidates · 学习中 $learning · 已掌握 $known'
+      : '$candidates candidates · $learning learning · $known known';
+
+  String vocabSeenTimes(int count) =>
+      _isZh ? '遇到 $count 次' : 'seen $count×';
+
+  String vocabSentenceAt(String lesson, int index) =>
+      _isZh ? '$lesson · 第 $index 句' : '$lesson · sentence $index';
+
+  String vocabStatusLabel(String key) {
+    switch (key) {
+      case 'candidate':
+        return _isZh ? '候选池' : 'Candidates';
+      case 'learning':
+        return _isZh ? '学习中' : 'Learning';
+      case 'known':
+        return _isZh ? '已掌握' : 'Known';
+      case 'ignored':
+        return _isZh ? '已忽略' : 'Ignored';
+      default:
+        return '';
+    }
+  }
+
+  String vocabSourceLabel(String key) {
+    switch (key) {
+      case 'tap':
+        return _isZh ? '点存' : 'tapped';
+      case 'dictation':
+        return _isZh ? '听写' : 'dictation';
+      case 'ai':
+        return _isZh ? 'AI' : 'AI';
+      default:
+        return '';
+    }
+  }
+
+  /// 学习组件名（v1 白名单）。
+  String planComponentLabel(String key) {
+    switch (key) {
+      case 'originalRelisten':
+        return _isZh ? '回原声' : 'Relisten';
+      case 'dictationRetry':
+        return _isZh ? '重听写' : 'Dictate again';
+      case 'clozeRecall':
+        return _isZh ? 'Cloze 回忆' : 'Cloze recall';
+      case 'morphologyNote':
+        return _isZh ? '形态纠错' : 'Word form';
+      case 'srsReview':
+        return _isZh ? 'SRS 复习' : 'SRS review';
+      default:
+        return '';
+    }
+  }
+
+  /// 计划原因 —— 每条建议都必须说得出依据（验收标准 2）。
+  String planReasonLabel(String key) {
+    switch (key) {
+      case 'reliableHearing':
+        return _isZh ? '听写漏词/替换' : 'missed or swapped in dictation';
+      case 'extraOnly':
+        return _isZh ? '听写多写了原文没有的词' : 'wrote words that were not there';
+      case 'spellingOnly':
+        return _isZh ? '只是拼写，不代表没听清' : 'spelling only — hearing is fine';
+      case 'morphologyOnly':
+        return _isZh ? '词尾形态没听出' : 'word form missed';
+      case 'uncertainOnly':
+        return _isZh ? '听写对齐不可靠，只回原声' : 'dictation alignment unreliable — relisten only';
+      case 'tapOnly':
+        return _isZh ? '仅手动收藏，先留在候选池' : 'saved by hand only — stays in candidates';
+      case 'knownDue':
+        return _isZh ? '已掌握且到了复习期' : 'known and due for review';
+      default:
+        return '';
+    }
+  }
+
+
+  // ------------------------------------------------------------- drill ----
+  // 学习组件执行页（附属层，v1 全部本地判定）。两条文案纪律：
+  //   ① 自评必须写成自评，不得伪装成测量结果；
+  //   ② 听写回执要区分「拼写差一点」与「写成别的词」——两类问题不同。
+  String get drillTitle => _isZh ? '练习' : 'Practice';
+  String get drillRelistenTitle => _isZh ? '先听原声' : 'Listen first';
+  String get drillRelistenBody => _isZh
+      ? '用原片音频再听一遍。这一步没有客观对错，按你的自评记录。'
+      : 'Replay the original audio. There is no objective check here — recorded as your own call.';
+  String get drillSelfReported => _isZh ? '自评' : 'self-reported';
+  String get drillListenedOk => _isZh ? '听清了' : 'Got it';
+  String get drillNotYet => _isZh ? '还有没听出的' : 'Not yet';
+  String get drillPlay => _isZh ? '播放原声' : 'Play original';
+  String get drillReplay => _isZh ? '再播一遍' : 'Play again';
+  String get drillNoAudio =>
+      _isZh ? '这一课的音频不在本机，无法回听' : 'Audio is not on this device';
+  String get drillDictationTitle => _isZh ? '听写这一句' : 'Dictate this sentence';
+  String get drillDictationBody =>
+      _isZh ? '提交之前不会显示原文' : 'The original stays hidden until you submit';
+  String get drillWriteHere => _isZh ? '写下你听到的句子…' : 'Type what you hear…';
+  String get drillSubmit => _isZh ? '提交' : 'Submit';
+  String get drillRetry => _isZh ? '再写一次' : 'Try again';
+  String get drillNext => _isZh ? '下一步' : 'Next';
+  String get drillFinish => _isZh ? '完成' : 'Done';
+  String get drillStart => _isZh ? '开始' : 'Start';
+
+  // ------------------------------------------------------------ review ----
+  // 闪卡复习（Item 级，一个词一张卡）。文案纪律同上：不夸大、不假装测量。
+  String get reviewTitle => _isZh ? '闪卡复习' : 'Flashcards';
+  String get reviewReveal => _isZh ? '看答案' : 'Show answer';
+  String get reviewAgain => _isZh ? '忘了' : 'Again';
+  String get reviewHard => _isZh ? '有点难' : 'Hard';
+  String get reviewGood => _isZh ? '记得' : 'Good';
+  String get reviewEasy => _isZh ? '太简单' : 'Easy';
+  String get reviewEmptyTitle => _isZh ? '今天没有到期的卡' : 'Nothing due today';
+  String get reviewEmptyBody => _isZh
+      ? '把候选词加入学习队列后，到期的卡会出现在这里。'
+      : 'Move candidates into the learning queue and due cards show up here.';
+  String get reviewDone => _isZh ? '完成' : 'Done';
+  String get reviewSkip => _isZh ? '跳过' : 'Skip';
+  String get reviewNewCard => _isZh ? '新卡' : 'New';
+  String get reviewNoContext => _isZh
+      ? '这张卡没有上下文，只能凭记忆回想。'
+      : 'No context on this card — recall from memory.';
+  String get reviewStart => _isZh ? '复习' : 'Review';
+  String get reviewFrontHint =>
+      _isZh ? '先回想，再翻面' : 'Recall first, then flip';
+  String get reviewAiQuizAction =>
+      _isZh ? '让 AI 考我造句' : 'Let AI quiz me';
+  String get reviewOpenSceneAction =>
+      _isZh ? '还原原片现场' : 'Back to the scene';
+
+  String reviewProgress(int current, int total) =>
+      _isZh ? '第 $current / $total 张' : '$current / $total';
+
+  String reviewEntry(int count) =>
+      _isZh ? '闪卡复习 · $count 张到期' : 'Flashcards · $count due';
+
+  String reviewSummary(int count) =>
+      _isZh ? '本轮复习了 $count 张' : 'Reviewed $count this round';
+
+  /// 下次到期时间：`again` 是 10 分钟，其余按天。
+  String reviewNextDue(int days) => days <= 0
+      ? (_isZh ? '下次：10 分钟后' : 'Next: in 10 min')
+      : (_isZh ? '下次：$days 天后' : 'Next: in $days d');
+  String get drillClozeTitle => _isZh ? '回忆这个词' : 'Recall the word';
+  String get drillClozeBody =>
+      _isZh ? '把空填上（只判这个词）' : 'Fill the blank (only this word is judged)';
+  String get drillClozeHere => _isZh ? '填写这个词…' : 'Type the word…';
+  String get drillMorphTitle => _isZh ? '词尾形态' : 'Word form';
+  String get drillMorphBody => _isZh
+      ? '这次错在词尾形态，不是没听出来 —— 重听帮不上忙。'
+      : 'This was a word-form slip, not a listening miss — replaying will not help.';
+  String get drillMorphYouWrote => _isZh ? '你写的是' : 'You wrote';
+  String get drillMorphCorrect => _isZh ? '正确形态' : 'Correct form';
+  String get drillAck => _isZh ? '记住了' : 'Got it';
+  String get drillNoSteps =>
+      _isZh ? '这个词现在不需要练习' : 'Nothing to drill for this word yet';
+  String get drillUncertainNote => _isZh
+      ? '对齐不可靠，只给整体结果'
+      : 'Alignment unreliable — overall result only';
+
+  // ------------------------------------------------------- ai drill ----
+  // AI 出题（10 号 §五）。纪律：AI 失败必须可跳过；判定文案如实，
+  // 不发明「掌握度 83%」这类数字。
+  String get drillAiTitle => _isZh ? 'AI 检查：真的会了吗' : 'AI check';
+  String get drillAiBody => _isZh
+      ? '两道开放题：先说原句里的意思，再用这个词造一个新场景。'
+      : 'Two open questions: the sense in the original sentence, then a new scene.';
+  String get drillAiLoading => _isZh ? '正在出题…' : 'Preparing…';
+  String get drillAiUnavailable => _isZh
+      ? 'AI 出题不可用（离线或未配置）。跳过不影响其它练习。'
+      : 'AI quiz unavailable (offline or not configured). Skipping affects nothing else.';
+  String get drillAiSkip => _isZh ? '跳过' : 'Skip';
+  String get drillAiQ1 => _isZh ? '第 1 题 · 原语境理解' : 'Q1 · In this sentence';
+  String get drillAiQ2 => _isZh ? '第 2 题 · 新语境产出' : 'Q2 · New scene';
+  String get drillAiQ3 =>
+      _isZh ? '第 3 题 · 消解冲突' : 'Q3 · Resolve the conflict';
+  String get drillAiAnswerHere =>
+      _isZh ? '用中英文都行，写下你的回答…' : 'Answer here (Chinese or English)…';
+  String get drillAiSubmit => _isZh ? '提交回答' : 'Submit answer';
+  String get drillAiGrading => _isZh ? '判卷中…' : 'Grading…';
+  String get drillAiPass => _isZh ? '通过' : 'Pass';
+  String get drillAiPartial => _isZh ? '部分对' : 'Partial';
+  String get drillAiFail => _isZh ? '未通过' : 'Fail';
+  String get drillAiVerdictKnown =>
+      _isZh ? '两题都过：这个词你在两个语境里都能取回并使用。' : 'Both pass: you can retrieve and use this word in two contexts.';
+  String get drillAiVerdictHalf =>
+      _isZh ? '一半一半：义项或产出还没稳，下次复习会再来。' : 'Half-known: sense or production is shaky — it will come back.';
+  String get drillAiVerdictUnknown =>
+      _isZh ? '两题都没过：先回原声，下次重点重练。' : 'Both fail: go back to the audio and redo this next time.';
+  String get drillAiListeningNote => _isZh
+      ? '认识，但原声里还听不稳 —— 听写证据仍失败。'
+      : 'You know it, but your ears still miss it in the audio.';
+  String drillAiReason(String code) => _isZh ? '原因：$code' : 'Reason: $code';
+
+  String drillProgress(int current, int total) =>
+      _isZh ? '第 $current / $total 步' : 'Step $current / $total';
+
+  String drillAccuracy(int percent) =>
+      _isZh ? '准确率 $percent%' : '$percent% correct';
+
+  String drillHint(String key) {
+    switch (key) {
+      case 'exact':
+        return _isZh ? '正确' : 'Correct';
+      case 'spelling':
+        return _isZh ? '差一点拼写 —— 听清了，是词形没记准' : 'Spelling — you heard it, the form slipped';
+      case 'wrongWord':
+        return _isZh ? '写成了别的词' : 'That was a different word';
+      case 'blank':
+        return _isZh ? '没有作答' : 'Left blank';
+      case 'partial':
+        return _isZh ? '对了一部分' : 'Partly right';
+      case 'alignment':
+        return _isZh ? '对齐不可靠，只给整体结果' : 'Alignment unreliable — overall only';
+      default:
+        return '';
+    }
+  }
+
+  // --------------------------------------------------------- dictation ----
+  // 听写（核心层 P1）：句级录入、段级集中批改。文案遵循 08 定调——
+  // 第二层原因只能写成「可能与…有关」，不得渲染成确定结论。
+  String get dictation => _isZh ? '听写' : 'Dictation';
+  String get dictationIntro => _isZh
+      ? '听不清就留空，写完整段再对答案'
+      : 'Leave blanks for what you miss — answers come after the segment';
+  String get dictationUnknown => _isZh ? '没听出来' : "Couldn't catch it";
+  String get done => _isZh ? '完成' : 'Done';
+  String get dictationClearUnknown => _isZh ? '取消留空' : 'Unmark';
+  String get dictationSubmit => _isZh ? '提交本段' : 'Submit segment';
+  String get dictationReplay => _isZh ? '重放本句' : 'Replay';
+  String get dictationPrevious => _isZh ? '上一句' : 'Previous';
+  String get dictationNext => _isZh ? '下一句' : 'Next';
+  String get dictationRewrite => _isZh ? '重写本段' : 'Redo segment';
+  String get dictationNextSegment => _isZh ? '下一段' : 'Next segment';
+  String get dictationAccuracy => _isZh ? '准确率' : 'Accuracy';
+  String get dictationBlankCount => _isZh ? '留空' : 'Blank';
+  String get dictationWriteHere => _isZh ? '写下你听到的句子…' : 'Type what you hear…';
+  String get dictationAllAnswered => _isZh ? '每句都已交代，可以提交' : 'All lines answered — ready to submit';
+  String get dictationRemaining => _isZh ? '还有未交代的句子' : 'Some lines still unanswered';
+  String get dictationUncertain => _isZh
+      ? '这一段无法精确定位，只给出整体结果'
+      : 'Alignment unreliable — overall result only';
+  String get dictationYourAnswer => _isZh ? '你的答案' : 'Your answer';
+  String get dictationExpected => _isZh ? '原文' : 'Original';
+  /// 短标签版（生词本证据行用），与长句版同源但更省空间。
+  String get dictationUncertainShort => _isZh ? '对齐不可靠' : 'alignment n/a';
+  String get dictationNoPeek => _isZh ? '本段批改前不显示原文' : 'Original hidden until you submit';
+
+  String dictationSegment(int current, int total) =>
+      _isZh ? '第 $current / $total 段' : 'Segment $current / $total';
+
+  /// 第二层提示统一出口——**永远带「可能」**。
+  String dictationCause(String key) {
+    switch (key) {
+      case 'weakForm':
+        return _isZh ? '可能与弱读有关' : 'possibly weak form';
+      case 'liaison':
+        return _isZh ? '可能与连读有关' : 'possibly liaison';
+      case 'plosion':
+        return _isZh ? '可能与失爆有关' : 'possibly incomplete plosive';
+      case 'flap':
+        return _isZh ? '可能与闪音有关' : 'possibly flap T/D';
+      default:
+        return '';
+    }
+  }
+
+  String dictationDiffType(String key) {
+    switch (key) {
+      case 'missing':
+        return _isZh ? '漏词' : 'missed';
+      case 'extra':
+        return _isZh ? '多写' : 'extra';
+      case 'spelling':
+        return _isZh ? '拼写近似' : 'spelling';
+      case 'morphology':
+        return _isZh ? '词尾形态' : 'word form';
+      case 'merged':
+        return _isZh ? '词边界(合并)' : 'word boundary';
+      case 'split':
+        return _isZh ? '词边界(拆分)' : 'word boundary';
+      case 'replaced':
+        return _isZh ? '替换' : 'replaced';
+      default:
+        return '';
+    }
+  }
+
+  // ------------------------------------------------------------ shell ----
+  String get tabLibrary => _isZh ? '课程' : 'Library';
+  String get tabListen => _isZh ? '听' : 'Listen';
+  String get tabReadAlong => _isZh ? '读' : 'Read';
+  String get tabCreate => _isZh ? '创建' : 'Create';
+  String get tabSettings => _isZh ? '设置' : 'Settings';
+
+  String get listenEmptyTitle => _isZh ? '还没有正在学习的课程' : 'No active lesson.';
+  String get listenEmptyBody => _isZh ? '去课程页选一课吧' : 'Choose one from Library.';
+
+  // ----------------------------------------------------------- library ---
+  String get import => _isZh ? '＋ 导入' : '＋ Import';
+  String get importLesson => _isZh ? '＋ 导入课程' : '＋ Import Lesson';
+  String get continueLearning => _isZh ? '继续学习' : 'CONTINUE';
+  String get allLessons => _isZh ? '全部课程' : 'LESSONS';
+  String get continueCta => _isZh ? '继续 →' : 'Continue →';
+  String get filterAll => _isZh ? '全部' : 'ALL';
+  String get viewGrid => _isZh ? '海报网格' : 'Grid view';
+  String get viewList => _isZh ? '列表视图' : 'List view';
+  String get noLessonsInLanguage =>
+      _isZh ? '该语种下暂无课程' : 'No lessons in this language.';
+  String get noLessonsTitle => _isZh ? '还没有课程' : 'No lessons yet.';
+  String get noLessonsBody =>
+      _isZh ? '导入第一课，开始精听。' : 'Import your first lesson\nto start listening.';
+
+  String get importing => _isZh ? '正在导入课程…' : 'Importing lesson…';
+  String get cannotImportTitle => _isZh ? '无法导入课程' : "Can't import lesson";
+  String get importFailed =>
+      _isZh ? '导入失败，请重试。' : 'Import failed. Please try again.';
+  String imported(Object title) => _isZh ? '导入成功：《$title》' : 'Imported: $title';
+  String deleted(Object title) => _isZh ? '已删除《$title》' : 'Deleted: $title';
+  String get lessonMissing =>
+      _isZh ? '课程不存在，可能已被删除' : 'Lesson not found. It may have been deleted.';
+
+  String get info => _isZh ? '查看信息' : 'Info';
+  String get deleteLessonMenu => _isZh ? '删除课程' : 'Delete lesson';
+  String get deleteTitle => _isZh ? '删除课程？' : 'Delete lesson?';
+  String get deleteBody => _isZh
+      ? '将同时删除课程与本地学习进度。'
+      : 'This removes the lesson and local learning progress.';
+  String get cancel => _isZh ? '取消' : 'Cancel';
+  String get delete => _isZh ? '删除' : 'Delete';
+  String get close => _isZh ? '关闭' : 'Close';
+  String get know => _isZh ? '知道了' : 'OK';
+  String get lessonIdLabel => _isZh ? '课程 ID' : 'Lesson ID';
+  String get sentenceCountLabel => _isZh ? '句数' : 'Sentences';
+  String get audioDurationLabel => _isZh ? '音频时长' : 'Audio duration';
+  String get importedAtLabel => _isZh ? '导入时间' : 'Imported';
+  String audioDurationMinSec(int minutes, int seconds) =>
+      _isZh ? '$minutes 分 $seconds 秒' : '$minutes min $seconds sec';
+
+  String errorText(LessonPackageError code) => switch (code) {
+    LessonPackageError.notFound =>
+      _isZh ? '找不到所选文件，请重新选择。' : 'The selected file could not be found.',
+    LessonPackageError.unreadable => _isZh ? '无法读取该文件，它可能已损坏或不是课程文件。' : 'The file could not be read. It may be damaged or not a lesson package.',
+    LessonPackageError.missingManifest =>
+      _isZh
+          ? '课程包缺少 manifest.json，不是有效的课程文件。'
+          : 'The package is missing manifest.json.',
+    LessonPackageError.badManifest =>
+      _isZh ? '课程信息格式不正确，无法导入。' : 'The lesson manifest is malformed.',
+    LessonPackageError.unsupportedVersion =>
+      _isZh
+          ? '课程包版本不受支持（当前仅支持版本 1）。'
+          : 'Unsupported package version (only version 1).',
+    LessonPackageError.missingSentences =>
+      _isZh ? '课程包缺少句子数据文件。' : 'The package is missing the sentence data file.',
+    LessonPackageError.badSentences =>
+      _isZh ? '句子数据格式不正确，无法导入。' : 'The sentence data is malformed.',
+    LessonPackageError.sentenceCountMismatch =>
+      _isZh
+          ? '课程信息与句子数量不一致，文件可能已损坏。'
+          : 'Sentence count mismatch — the package may be damaged.',
+    LessonPackageError.missingAudio =>
+      _isZh ? '课程包缺少音频文件。' : 'The package is missing the audio file.',
+    LessonPackageError.emptySentences =>
+      _isZh ? '这个课程没有任何句子。' : 'This lesson has no sentences.',
+  };
+
+  // --------------------------------------------------------- listening ---
+  String get prev => _isZh ? '上一句' : 'Prev';
+  String get next => _isZh ? '下一句' : 'Next';
+  String get retry => _isZh ? '重试' : 'Retry';
+  String get fluidText => _isZh ? '流体文本' : 'Fluid text';
+  String get singlePageText => _isZh ? '单页文本' : 'Single page';
+  String get playbackSpeed => _isZh ? '滑动变速' : 'Playback speed';
+  String get loopsPerSentence => _isZh ? '每句循环次数' : 'Loops per sentence';
+  String loopTimes(int n) => _isZh ? '$n 次' : '$n×';
+  String get loopForever => _isZh ? '无限' : '∞';
+
+  // ---------------------------------------------------------- settings ---
+  String get settingsTitle => _isZh ? '设置' : 'Settings';
+  String get appearance => _isZh ? '外观' : 'APPEARANCE';
+  String get typography => _isZh ? '排版' : 'TYPOGRAPHY';
+  String get languageSection => _isZh ? '语言' : 'LANGUAGE';
+  String get theme => _isZh ? '主题' : 'Theme';
+  String get system => _isZh ? '跟随系统' : 'System';
+  String get light => _isZh ? '白昼' : 'Light';
+  String get dark => _isZh ? '黑夜' : 'Dark';
+  String get font => _isZh ? '字体' : 'Font';
+  String get textSize => _isZh ? '字号' : 'Text size';
+  String get textSizeSheet => _isZh ? '滑动调整字号' : 'Text size';
+  String get preview => _isZh ? '预览' : 'PREVIEW';
+
+  // ------------------------------------------------------ translation ----
+  String get translation => _isZh ? '翻译服务' : 'TRANSLATION';
+  String get translationBaseUrl => _isZh ? '接口地址' : 'Endpoint';
+  String get translationApiKey => _isZh ? 'API 密钥' : 'API key';
+  String get translationModel => _isZh ? '模型' : 'Model';
+  String get translationBaseUrlHint =>
+      _isZh ? 'https://api.xiaomimimo.com/v1' : 'https://api.xiaomimimo.com/v1';
+  String get translationApiKeyHint =>
+      _isZh ? '未设置（接口无需鉴权）' : 'Not set (endpoint needs no key)';
+  String get translationApiKeyMissing =>
+      _isZh ? '未设置密钥，付费服务会返回 401' : 'No key set — paid endpoints will 401';
+  String get translationModelSheet =>
+      _isZh ? '选择模型' : 'Choose a model';
+  String get translationModelSearch =>
+      _isZh ? '搜索模型' : 'Search models';
+  String get translationModelLoading =>
+      _isZh ? '正在读取模型列表…' : 'Loading models…';
+  String get translationModelRetry => _isZh ? '重试' : 'Retry';
+  String get translationTest => _isZh ? '测试连接' : 'Test connection';
+  String get translationTesting => _isZh ? '正在测试…' : 'Testing…';
+  String translationTestOk(Object model) =>
+      _isZh ? '连接正常 · $model' : 'OK · $model';
+  String translationFailed(Object reason) =>
+      _isZh ? '失败：$reason' : 'Failed: $reason';
+  String get save => _isZh ? '保存' : 'Save';
+
+  // ---------------------------------------------------- youtube relay ----
+  String get youtubeRelayTitle => _isZh ? 'YouTube 中继' : 'YouTube Relay';
+  String get youtubeRelayBaseUrl =>
+      _isZh ? '中继服务地址' : 'Relay Base URL';
+  String get youtubeRelayBaseUrlHint =>
+      _isZh ? 'http://127.0.0.1:8793 或 局域网 IP' : 'http://127.0.0.1:8793 or LAN IP';
+  String get youtubeRelayTest => _isZh ? '测试中继连通性' : 'Test Relay Connection';
+  String get youtubeRelayTesting => _isZh ? '正在探测中继…' : 'Testing relay…';
+  String get youtubeRelayTestOk =>
+      _isZh ? '中继服务连通正常 (/ping 200)' : 'Relay reachable (/ping 200)';
+  String youtubeRelayTestFailed(Object reason) =>
+      _isZh ? '中继未响应：$reason' : 'Relay unreachable: $reason';
+  String get youtubeRelayTip =>
+      _isZh
+          ? '中继默认跑在手机自己的 Termux 里（不需要电脑）：打开 Termux 跑 '
+                'bash /sdcard/Download/ll_relay_ctl.sh start。\n'
+                '它需要手机的代理已连接才能访问 YouTube。\n'
+                '也可改用电脑端中继：运行 python tool/youtube_relay.py 并执行 '
+                'adb reverse tcp:8793 tcp:8793（同一端口，二者互斥）。'
+          : 'The relay runs inside the phone\'s own Termux (no PC needed): open '
+                'Termux and run bash /sdcard/Download/ll_relay_ctl.sh start.\n'
+                'It needs the phone\'s proxy to be connected to reach YouTube.\n'
+                'A PC-side relay also works: run python tool/youtube_relay.py with '
+                'adb reverse tcp:8793 tcp:8793 (same port — the two are mutually exclusive).';
+
+  // ------------------------------------------------------- ai tutor ------
+  String get tutorOnlineTitle =>
+      _isZh ? 'AI 伴学 (在线大模型)' : 'AI Tutor (Online LLM)';
+  String get tutorBaseUrl => _isZh ? '网关地址' : 'Gateway endpoint';
+  String get tutorApiKey => _isZh ? '网关密钥' : 'Gateway key';
+  String get tutorModel => _isZh ? '伴学模型' : 'Tutor model';
+  String get tutorBaseUrlHint =>
+      _isZh ? 'https://api.xiaomimimo.com/v1' : 'https://api.xiaomimimo.com/v1';
+  String get tutorApiKeyHint =>
+      _isZh ? '未设置（网关无需鉴权时可留空）' : 'Not set (leave empty if unauthenticated)';
+  String get tutorPrefillFree =>
+      _isZh ? '恢复默认 MiMo 配置' : 'Reset to MiMo defaults';
+  String get tutorPrefilled =>
+      _isZh ? '已恢复默认 MiMo 配置' : 'MiMo defaults restored';
+  String get tutorTest => _isZh ? '测试伴学对话' : 'Test tutor chat';
+  String get tutorTesting => _isZh ? '正在等待模型回答…' : 'Awaiting model reply…';
+  String tutorTestOk(Object model) =>
+      _isZh ? '伴学链路正常 · $model' : 'Tutor reachable · $model';
+  String tutorTestFailed(Object reason) =>
+      _isZh ? '伴学链路异常：$reason' : 'Tutor unreachable: $reason';
+  String get tutorFreeTip =>
+      _isZh
+          ? '默认直连小米 MiMo（mimo-v2.6-flash），手机无需电脑、无需 adb 映射，失败自动回退到同厂其它档位。翻译与伴学共用同一模型。'
+          : 'Talks to Xiaomi MiMo (mimo-v2.6-flash) directly — no PC, no adb reverse — and falls back across MiMo tiers on failure. Translation shares the same model.';
+
+  // --------------------------------------------------------- creation ----
+  /// 取源失败时的操作清单。**必须可照着做**，不要写"请重试"这种废话。
+  ///
+  /// 2026-09-23 起 YouTube 中继默认跑在**手机自己的 Termux** 里，不再依赖
+  /// 电脑，因此清单也分为两种故障，由 [SourceHint] 选择：
+  ///  - [SourceHint.relayDown]：中继没起来 → 去启动它；
+  ///  - [SourceHint.relayBlocked]：中继在跑但拿不到音频 → 去检查代理。
+  /// 两者都给一条**完全不需要代理的替代路径**（B 站链接），保证永远有路可走。
+  String creationRelayChecklist(SourceHint? hint) {
+    if (hint == SourceHint.relayBlocked) {
+      return _isZh
+          ? '① 检查手机的代理是否已连接（设置里确认 VPN/代理正在运行）\n'
+                '     中继自己也要靠它才能访问 YouTube\n'
+                '② 代理正常仍失败 → 多半是 YouTube 的反机器人校验，\n'
+                '     换一个视频或改用 B 站链接试试\n'
+                '③ 或者改用 B 站链接 —— 它完全不需要代理'
+          : '1. Make sure the phone\'s proxy/VPN is actually connected — the relay needs it to reach YouTube\n'
+                '2. If the proxy is fine, YouTube is likely challenging the request: try another video or a Bilibili link\n'
+                '3. Or paste a Bilibili link instead: it needs no proxy at all';
+    }
+    return _isZh
+        ? '① 手机上打开 Termux，粘一行：\n'
+              '     bash /sdcard/Download/ll_relay_ctl.sh start\n'
+              '   （看到 listening on 127.0.0.1:8793 即成功）\n'
+              '② 确认手机的代理已连接 —— 中继要靠它访问 YouTube\n'
+              '③ 或者改用 B 站链接 —— 它完全不需要中继'
+        : '1. Open Termux on the phone and paste:\n'
+              '     bash /sdcard/Download/ll_relay_ctl.sh start\n'
+              '   (success = "listening on 127.0.0.1:8793")\n'
+              '2. Make sure the phone\'s proxy is connected — the relay needs it to reach YouTube\n'
+              '3. Or paste a Bilibili link instead: it needs no relay at all';
+  }
+
+  String get creationFailureDetail => _isZh ? '技术细节' : 'Technical detail';
+
+  /// 「识别出的句子太少」时的操作清单。
+  ///
+  /// 这条错误在全项目只有一个抛出点（切句后不足 3 句），所以清单可以写得很确定：
+  /// 按"最可能"排序 —— 视频太短、没人声、再换源。技术细节里带 words/audio
+  /// 两个量，正好能区分这三种（见 creation_controller 的注释）。
+  String get creationTooFewSentencesChecklist => _isZh
+      ? '① 视频是不是太短了？建议选 2 分钟以上、有人连续说话的内容\n'
+            '② 视频里有没有人声？纯音乐 / 只有字幕的画面识别不出句子\n'
+            '③ 换个视频试试；技术细节里的 words / audio 两个数能直接判断：\n'
+            '     audio 很短 → 视频太短；audio 长但 words 极少 → 音频里没人声'
+      : '1. Is the video too short? Pick 2+ minutes of continuous speech\n'
+            '2. Does it contain speech at all? Music-only or caption-only clips yield nothing\n'
+            '3. Try another video; the words/audio numbers in the detail tell you which: '
+            'a tiny audio = too short, a long audio with almost no words = no speech';
+
+  String get createLesson => _isZh ? '制作课程' : 'Create Lesson';
+  String get creationMenuImport => _isZh ? '导入课程' : 'Import Lesson';
+
+  /// 空状态主按钮：制作新课程。
+  /// 2026-10-16 修：此前 `library_screen.dart` 空状态把它**硬编码成中文**，
+  /// 英文界面下中文串偏长，直接把 Row 顶出 `RIGHT OVERFLOWED BY 26 PIXELS`。
+  String get createNewLesson => _isZh ? '制作新课程' : 'New Lesson';
+  String get creationMenuFromFile => _isZh ? '从本地文件创建' : 'Create from File';
+  String get creationMenuFromLink => _isZh ? '从链接创建' : 'Create from Link';
+  String get soon => _isZh ? '即将支持' : 'soon';
+  String get creationBusy =>
+      _isZh ? '已有课程正在制作' : 'A lesson is already being created.';
+  String get viewProgress => _isZh ? '查看进度' : 'View Progress';
+  String get cancelCreation => _isZh ? '取消制作' : 'Cancel';
+  String get lessonReady => _isZh ? '课程完成' : 'Lesson Ready';
+  String get startListening => _isZh ? '开始精听' : 'Start Listening';
+  String get elapsed => _isZh ? '已用时' : 'elapsed';
+  String sentencesReady(int n) => _isZh ? '$n 句' : '$n sentences';
+  String get sourceLabel => _isZh ? '来源' : 'Source';
+
+  String stageName(LessonJobStage stage) => switch (stage) {
+    LessonJobStage.queued => _isZh ? '排队中' : 'Queued',
+    LessonJobStage.acquiringMedia => _isZh ? '获取媒体' : 'Acquiring media',
+    LessonJobStage.preparingAudio => _isZh ? '准备音频' : 'Preparing audio',
+    LessonJobStage.transcribing => _isZh ? '转写中' : 'Transcribing',
+    LessonJobStage.segmenting => _isZh ? '分句中' : 'Segmenting',
+    LessonJobStage.translating => _isZh ? '翻译中' : 'Translating',
+    LessonJobStage.packaging => _isZh ? '打包中' : 'Packaging',
+    LessonJobStage.completed => _isZh ? '已完成' : 'Completed',
+    LessonJobStage.failed => _isZh ? '失败' : 'Failed',
+    LessonJobStage.cancelled => _isZh ? '已取消' : 'Cancelled',
+  };
+
+  String errorMessage(CreationError code) => switch (code) {
+    CreationError.inputError => _isZh ? '输入无效。' : 'Invalid input.',
+    CreationError.sourceUnavailable => _isZh
+        ? '取源通道不可用 —— 链接没有问题，是拿不到音频。'
+        : 'Source channel unavailable — the link is fine, the audio is not reachable.',
+    CreationError.mediaError =>
+      _isZh ? '无法处理该媒体文件。' : 'Could not process this media file.',
+    CreationError.asrError => _isZh
+        ? '转写结果不可用 —— 识别出的句子太少，凑不成一课。'
+        : 'Transcription unusable — too few sentences were recognised.',
+    CreationError.translationError => _isZh ? '翻译失败。' : 'Translation failed.',
+    CreationError.packageError => _isZh ? '打包失败。' : 'Packaging failed.',
+    CreationError.storageError =>
+      _isZh ? '存储空间不足。' : 'Not enough free storage.',
+    CreationError.cancelled => _isZh ? '已取消。' : 'Cancelled.',
+  };
+
+  // ----------------------------------------------------------- startup ----
+  // 启动期一次性提示（Task 1.4 硬化）：本地课程库打开失败时不再静默降级。
+  // 文案按码映射，与界面语言同步；详情里暴露原始异常，便于诊断。
+  String startupNoticeTitle(StartupNoticeKind kind) => switch (kind) {
+    StartupNoticeKind.dbOpenFailed =>
+      _isZh ? '本地课程库打不开' : 'Local lesson library unavailable',
+  };
+  String startupNoticeBody(StartupNoticeKind kind) => switch (kind) {
+    StartupNoticeKind.dbOpenFailed => _isZh
+        ? '已降级为临时模式：本次启动导入的课程不会跨启动保留。请重装应用或检查存储权限后重启。'
+        : 'Running in temporary mode: lessons imported this session will not '
+            'persist. Reinstall the app or check storage permissions, then restart.',
+  };
+  String get startupNoticeDetail => _isZh ? '查看详情' : 'Details';
+  String get startupNoticeDismiss => _isZh ? '知道了' : 'Got it';
+  String get startupNoticeDetailTitle => _isZh ? '启动诊断详情' : 'Startup diagnostics';
+  String get startupNoticeDetailClose => _isZh ? '关闭' : 'Close';
+}
+
+/// 启动期一次性提示的类型码（文案在 [LLStrings] 里映射，与界面语言同步）。
+enum StartupNoticeKind { dbOpenFailed }
+
+/// 启动期一次性提示的数据载体：类型 + 原始异常（供诊断详情展示）。
+///
+/// 由 [main] 在启动时构造，经首屏透传给一次性的启动提示弹窗
+/// （Task 1.4 硬化：本地库降级不再静默）。放在这里而非 main.dart，
+/// 是为了让首屏不必反向依赖入口文件。
+class StartupNotice {
+  const StartupNotice(this.kind, {this.error, this.stackTrace});
+  final StartupNoticeKind kind;
+  final Object? error;
+  final StackTrace? stackTrace;
+}
