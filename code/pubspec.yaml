@@ -111,6 +111,9 @@ flutter:
     - assets/audio/gettysburg.mp3
     - assets/data/ngsl3000.tsv
     - assets/data/textbook_grade2_term1.json
+    # 开发期用的真实课文 fixture（读页 UI 实验室 lib/dev/reading_preview.dart）。
+    # 取自真机课包 xiaokedou-b-dual 的 69 句，供 Preview 与 Golden 回归使用。
+    - assets/data/dev_preview_sentences.json
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

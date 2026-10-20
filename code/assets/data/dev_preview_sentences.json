@@ -1,0 +1,554 @@
+[
+ {
+  "id": "s000",
+  "index": 0,
+  "startMs": 640,
+  "endMs": 880,
+  "english": "课文1",
+  "chinese": "课文1"
+ },
+ {
+  "id": "s001",
+  "index": 1,
+  "startMs": 910,
+  "endMs": 2640,
+  "english": "小蝌蚪找妈妈",
+  "chinese": "小蝌蚪找妈妈"
+ },
+ {
+  "id": "s002",
+  "index": 2,
+  "startMs": 4600,
+  "endMs": 5400,
+  "english": "池塘里",
+  "chinese": "池塘里"
+ },
+ {
+  "id": "s003",
+  "index": 3,
+  "startMs": 5800,
+  "endMs": 7200,
+  "english": "有一群小蝌蚪，",
+  "chinese": "有一群小蝌蚪，"
+ },
+ {
+  "id": "s004",
+  "index": 4,
+  "startMs": 8320,
+  "endMs": 9500,
+  "english": "大大的脑袋，",
+  "chinese": "大大的脑袋，"
+ },
+ {
+  "id": "s005",
+  "index": 5,
+  "startMs": 9840,
+  "endMs": 11060,
+  "english": "黑灰色的身子，",
+  "chinese": "黑灰色的身子，"
+ },
+ {
+  "id": "s006",
+  "index": 6,
+  "startMs": 11740,
+  "endMs": 13520,
+  "english": "甩着长长的尾巴，",
+  "chinese": "甩着长长的尾巴，"
+ },
+ {
+  "id": "s007",
+  "index": 7,
+  "startMs": 13860,
+  "endMs": 15780,
+  "english": "快活地游来游去。",
+  "chinese": "快活地游来游去。"
+ },
+ {
+  "id": "s008",
+  "index": 8,
+  "startMs": 17920,
+  "endMs": 19720,
+  "english": "小蝌蚪游哇游，",
+  "chinese": "小蝌蚪游哇游，"
+ },
+ {
+  "id": "s009",
+  "index": 9,
+  "startMs": 20660,
+  "endMs": 21380,
+  "english": "过了几天，",
+  "chinese": "过了几天，"
+ },
+ {
+  "id": "s010",
+  "index": 10,
+  "startMs": 22200,
+  "endMs": 23940,
+  "english": "长出两条后腿。",
+  "chinese": "长出两条后腿。"
+ },
+ {
+  "id": "s011",
+  "index": 11,
+  "startMs": 26060,
+  "endMs": 27740,
+  "english": "他们看见鲤鱼妈妈",
+  "chinese": "他们看见鲤鱼妈妈"
+ },
+ {
+  "id": "s012",
+  "index": 12,
+  "startMs": 27940,
+  "endMs": 29660,
+  "english": "在教小鲤鱼捕食，",
+  "chinese": "在教小鲤鱼捕食，"
+ },
+ {
+  "id": "s013",
+  "index": 13,
+  "startMs": 30380,
+  "endMs": 32080,
+  "english": "就迎上去，问：",
+  "chinese": "就迎上去，问："
+ },
+ {
+  "id": "s014",
+  "index": 14,
+  "startMs": 33620,
+  "endMs": 34580,
+  "english": "“鲤鱼阿姨，",
+  "chinese": "“鲤鱼阿姨，"
+ },
+ {
+  "id": "s015",
+  "index": 15,
+  "startMs": 35040,
+  "endMs": 35900,
+  "english": "我们的妈妈",
+  "chinese": "我们的妈妈"
+ },
+ {
+  "id": "s016",
+  "index": 16,
+  "startMs": 35980,
+  "endMs": 36740,
+  "english": "在哪里？”",
+  "chinese": "在哪里？”"
+ },
+ {
+  "id": "s017",
+  "index": 17,
+  "startMs": 38540,
+  "endMs": 39680,
+  "english": "鲤鱼妈妈说：",
+  "chinese": "鲤鱼妈妈说："
+ },
+ {
+  "id": "s018",
+  "index": 18,
+  "startMs": 41400,
+  "endMs": 42500,
+  "english": "“你们的妈妈",
+  "chinese": "“你们的妈妈"
+ },
+ {
+  "id": "s019",
+  "index": 19,
+  "startMs": 42700,
+  "endMs": 43720,
+  "english": "四条腿，",
+  "chinese": "四条腿，"
+ },
+ {
+  "id": "s020",
+  "index": 20,
+  "startMs": 44100,
+  "endMs": 45040,
+  "english": "宽嘴巴。",
+  "chinese": "宽嘴巴。"
+ },
+ {
+  "id": "s021",
+  "index": 21,
+  "startMs": 45720,
+  "endMs": 47160,
+  "english": "你们到那边",
+  "chinese": "你们到那边"
+ },
+ {
+  "id": "s022",
+  "index": 22,
+  "startMs": 47360,
+  "endMs": 48120,
+  "english": "去找吧！”",
+  "chinese": "去找吧！”"
+ },
+ {
+  "id": "s023",
+  "index": 23,
+  "startMs": 50140,
+  "endMs": 51520,
+  "english": "小蝌蚪游哇游，",
+  "chinese": "小蝌蚪游哇游，"
+ },
+ {
+  "id": "s024",
+  "index": 24,
+  "startMs": 52520,
+  "endMs": 53140,
+  "english": "过了几天，",
+  "chinese": "过了几天，"
+ },
+ {
+  "id": "s025",
+  "index": 25,
+  "startMs": 53960,
+  "endMs": 55740,
+  "english": "长出两条前腿。",
+  "chinese": "长出两条前腿。"
+ },
+ {
+  "id": "s026",
+  "index": 26,
+  "startMs": 57400,
+  "endMs": 58650,
+  "english": "他们看见一只乌龟",
+  "chinese": "他们看见一只乌龟"
+ },
+ {
+  "id": "s027",
+  "index": 27,
+  "startMs": 59040,
+  "endMs": 60360,
+  "english": "摆动着四条腿",
+  "chinese": "摆动着四条腿"
+ },
+ {
+  "id": "s028",
+  "index": 28,
+  "startMs": 60600,
+  "endMs": 61420,
+  "english": "在水里游，",
+  "chinese": "在水里游，"
+ },
+ {
+  "id": "s029",
+  "index": 29,
+  "startMs": 61773,
+  "endMs": 63640,
+  "english": "连忙追上去，",
+  "chinese": "连忙追上去，"
+ },
+ {
+  "id": "s030",
+  "index": 30,
+  "startMs": 64080,
+  "endMs": 64520,
+  "english": "叫着：",
+  "chinese": "叫着："
+ },
+ {
+  "id": "s031",
+  "index": 31,
+  "startMs": 65220,
+  "endMs": 66220,
+  "english": "“妈妈，妈妈！”",
+  "chinese": "“妈妈，妈妈！”"
+ },
+ {
+  "id": "s032",
+  "index": 32,
+  "startMs": 68080,
+  "endMs": 69440,
+  "english": "乌龟笑着说：",
+  "chinese": "乌龟笑着说："
+ },
+ {
+  "id": "s033",
+  "index": 33,
+  "startMs": 69760,
+  "endMs": 71670,
+  "english": "“我不是",
+  "chinese": "“我不是"
+ },
+ {
+  "id": "s034",
+  "index": 34,
+  "startMs": 71700,
+  "endMs": 72820,
+  "english": "你们的妈妈。",
+  "chinese": "你们的妈妈。"
+ },
+ {
+  "id": "s035",
+  "index": 35,
+  "startMs": 73740,
+  "endMs": 74580,
+  "english": "你们的妈妈",
+  "chinese": "你们的妈妈"
+ },
+ {
+  "id": "s036",
+  "index": 36,
+  "startMs": 75160,
+  "endMs": 76070,
+  "english": "头顶上有",
+  "chinese": "头顶上有"
+ },
+ {
+  "id": "s037",
+  "index": 37,
+  "startMs": 76100,
+  "endMs": 77560,
+  "english": "两只大眼睛，",
+  "chinese": "两只大眼睛，"
+ },
+ {
+  "id": "s038",
+  "index": 38,
+  "startMs": 78240,
+  "endMs": 79840,
+  "english": "披着绿衣裳。",
+  "chinese": "披着绿衣裳。"
+ },
+ {
+  "id": "s039",
+  "index": 39,
+  "startMs": 80960,
+  "endMs": 81810,
+  "english": "你们到那边",
+  "chinese": "你们到那边"
+ },
+ {
+  "id": "s040",
+  "index": 40,
+  "startMs": 81840,
+  "endMs": 82620,
+  "english": "去找吧！”",
+  "chinese": "去找吧！”"
+ },
+ {
+  "id": "s041",
+  "index": 41,
+  "startMs": 85080,
+  "endMs": 86740,
+  "english": "小蝌蚪游哇游，",
+  "chinese": "小蝌蚪游哇游，"
+ },
+ {
+  "id": "s042",
+  "index": 42,
+  "startMs": 87000,
+  "endMs": 88720,
+  "english": "过了几天，",
+  "chinese": "过了几天，"
+ },
+ {
+  "id": "s043",
+  "index": 43,
+  "startMs": 89360,
+  "endMs": 90660,
+  "english": "尾巴变短了。",
+  "chinese": "尾巴变短了。"
+ },
+ {
+  "id": "s044",
+  "index": 44,
+  "startMs": 92460,
+  "endMs": 93080,
+  "english": "他们游到",
+  "chinese": "他们游到"
+ },
+ {
+  "id": "s045",
+  "index": 45,
+  "startMs": 93100,
+  "endMs": 93940,
+  "english": "荷花旁边，",
+  "chinese": "荷花旁边，"
+ },
+ {
+  "id": "s046",
+  "index": 46,
+  "startMs": 94980,
+  "endMs": 96140,
+  "english": "看见荷叶上",
+  "chinese": "看见荷叶上"
+ },
+ {
+  "id": "s047",
+  "index": 47,
+  "startMs": 96380,
+  "endMs": 97700,
+  "english": "蹲着一只大青蛙，",
+  "chinese": "蹲着一只大青蛙，"
+ },
+ {
+  "id": "s048",
+  "index": 48,
+  "startMs": 97999,
+  "endMs": 100360,
+  "english": "披着碧绿的衣裳，",
+  "chinese": "披着碧绿的衣裳，"
+ },
+ {
+  "id": "s049",
+  "index": 49,
+  "startMs": 101080,
+  "endMs": 102400,
+  "english": "露着雪白的肚皮，",
+  "chinese": "露着雪白的肚皮，"
+ },
+ {
+  "id": "s050",
+  "index": 50,
+  "startMs": 103460,
+  "endMs": 105620,
+  "english": "鼓着一对大眼睛。",
+  "chinese": "鼓着一对大眼睛。"
+ },
+ {
+  "id": "s051",
+  "index": 51,
+  "startMs": 105820,
+  "endMs": 109170,
+  "english": "小蝌蚪游过去，",
+  "chinese": "小蝌蚪游过去，"
+ },
+ {
+  "id": "s052",
+  "index": 52,
+  "startMs": 109200,
+  "endMs": 110249,
+  "english": "叫着：",
+  "chinese": "叫着："
+ },
+ {
+  "id": "s053",
+  "index": 53,
+  "startMs": 111120,
+  "endMs": 112060,
+  "english": "“妈妈，妈妈！”",
+  "chinese": "“妈妈，妈妈！”"
+ },
+ {
+  "id": "s054",
+  "index": 54,
+  "startMs": 112513,
+  "endMs": 114470,
+  "english": "青蛙妈妈",
+  "chinese": "青蛙妈妈"
+ },
+ {
+  "id": "s055",
+  "index": 55,
+  "startMs": 114500,
+  "endMs": 115580,
+  "english": "低头一看，",
+  "chinese": "低头一看，"
+ },
+ {
+  "id": "s056",
+  "index": 56,
+  "startMs": 115874,
+  "endMs": 117140,
+  "english": "笑着说：",
+  "chinese": "笑着说："
+ },
+ {
+  "id": "s057",
+  "index": 57,
+  "startMs": 117719,
+  "endMs": 119160,
+  "english": "“好孩子，",
+  "chinese": "“好孩子，"
+ },
+ {
+  "id": "s058",
+  "index": 58,
+  "startMs": 119320,
+  "endMs": 120630,
+  "english": "你们已经",
+  "chinese": "你们已经"
+ },
+ {
+  "id": "s059",
+  "index": 59,
+  "startMs": 120660,
+  "endMs": 121980,
+  "english": "长成青蛙了，",
+  "chinese": "长成青蛙了，"
+ },
+ {
+  "id": "s060",
+  "index": 60,
+  "startMs": 122279,
+  "endMs": 125132,
+  "english": "快跳上来吧！”",
+  "chinese": "快跳上来吧！”"
+ },
+ {
+  "id": "s061",
+  "index": 61,
+  "startMs": 125960,
+  "endMs": 127560,
+  "english": "他们后腿一蹬，",
+  "chinese": "他们后腿一蹬，"
+ },
+ {
+  "id": "s062",
+  "index": 62,
+  "startMs": 127960,
+  "endMs": 129100,
+  "english": "向前一跳，",
+  "chinese": "向前一跳，"
+ },
+ {
+  "id": "s063",
+  "index": 63,
+  "startMs": 129780,
+  "endMs": 131200,
+  "english": "蹦到了荷叶上。",
+  "chinese": "蹦到了荷叶上。"
+ },
+ {
+  "id": "s064",
+  "index": 64,
+  "startMs": 131892,
+  "endMs": 134620,
+  "english": "不知什么时候，",
+  "chinese": "不知什么时候，"
+ },
+ {
+  "id": "s065",
+  "index": 65,
+  "startMs": 135220,
+  "endMs": 136560,
+  "english": "小青蛙的尾巴",
+  "chinese": "小青蛙的尾巴"
+ },
+ {
+  "id": "s066",
+  "index": 66,
+  "startMs": 137220,
+  "endMs": 138200,
+  "english": "已经不见了。",
+  "chinese": "已经不见了。"
+ },
+ {
+  "id": "s067",
+  "index": 67,
+  "startMs": 138220,
+  "endMs": 140860,
+  "english": "他们跟着妈妈，",
+  "chinese": "他们跟着妈妈，"
+ },
+ {
+  "id": "s068",
+  "index": 68,
+  "startMs": 141080,
+  "endMs": 143180,
+  "english": "天天去捉害虫。",
+  "chinese": "天天去捉害虫。"
+ }
+]

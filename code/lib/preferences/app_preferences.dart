@@ -299,6 +299,7 @@ class AppPreferences {
     this.libraryGridView = true,
     this.scrubberHaptics = true,
     this.lessonLoop = true,
+    this.pinyinScale = 1.0,
     this.configVersion = kCurrentConfigVersion,
   });
 
@@ -311,6 +312,12 @@ class AppPreferences {
   final LearningFont learningFont;
   final LearningChineseFont learningChineseFont;
   final double textScale;
+
+  /// 拼音大小倍率（2026-10-20 郭老师：字体控制再加一个拼音大小）。
+  ///
+  /// 与 [textScale] **独立**：汉字多大、拼音多大，由两件事各管各的。
+  /// 1.0 = 跟随默认比例（汉字的 52%）；0.8 拼音小一点；1.25 拼音大一点。
+  final double pinyinScale;
   final AppLanguage uiLanguage;
 
   /// OpenAI-compatible base URL, `/v1` included.
@@ -393,6 +400,7 @@ class AppPreferences {
     bool? libraryGridView,
     bool? scrubberHaptics,
     bool? lessonLoop,
+    double? pinyinScale,
     int? configVersion,
   }) => AppPreferences(
     themeMode: themeMode ?? this.themeMode,
@@ -400,6 +408,7 @@ class AppPreferences {
     learningFont: learningFont ?? this.learningFont,
     learningChineseFont: learningChineseFont ?? this.learningChineseFont,
     textScale: textScale ?? this.textScale,
+    pinyinScale: pinyinScale ?? this.pinyinScale,
     uiLanguage: uiLanguage ?? this.uiLanguage,
     translationBaseUrl: translationBaseUrl ?? this.translationBaseUrl,
     translationApiKey: translationApiKey ?? this.translationApiKey,
@@ -479,10 +488,27 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
   static const _keyLibraryGridView = 'listenloop:pref.libraryGridView';
   static const _keyScrubberHaptics = 'listenloop:pref.scrubberHaptics';
   static const _keyLessonLoop = 'listenloop:pref.lessonLoop';
+  static const _keyPinyinScale = 'listenloop:pref.pinyinScale';
   static const _keyConfigVersion = 'listenloop:pref.configVersion';
 
   /// Pre-follow-up builds stored the size as a preset name; honour it once.
   static const _legacyKeyTextSize = 'listenloop:pref.textSize';
+
+  /// 旧 4 档预设名 → 当时的真实缩放值。
+  ///
+  /// 2026-10-20 字号预设从 4 档（S/M/L/XL）收到 3 档「小/中/大」之后，枚举名
+  /// 的**含义整体挪了一位**（old 'large' = 1.00，new 'large' = 1.30）。若直接按
+  /// 新表映射，老用户一升级字号会突然变大/变小。所以 legacy 名字单独走这张
+  /// 旧表，保证「升级不改字号」。
+  static const _legacyPresetScales = <String, double>{
+    'small': 0.50,
+    'normal': 0.75,
+    'large': 1.00,
+    'extraLarge': 1.30,
+  };
+
+  static double? _legacyPresetScale(String name) =>
+      _legacyPresetScales[name];
 
   @override
   Future<AppPreferences> load() async {
@@ -512,14 +538,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
     final legacy = sp.getString(_legacyKeyTextSize);
     final scale =
         _readDouble(sp, _keyTextScale) ??
-        (legacy == null
-            ? null
-            : LearningTextSizePreset.values
-                  .firstWhere(
-                    (preset) => preset.name == legacy,
-                    orElse: () => LearningTextSizePreset.normal,
-                  )
-                  .scale);
+        (legacy == null ? null : _legacyPresetScale(legacy));
     return AppPreferences(
       themeMode: ThemeMode.values.firstWhere(
         (m) => m.name == sp.getString(_keyThemeMode),
@@ -591,6 +610,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
       libraryGridView: _readBool(sp, _keyLibraryGridView) ?? true,
       scrubberHaptics: _readBool(sp, _keyScrubberHaptics) ?? true,
       lessonLoop: _readBool(sp, _keyLessonLoop) ?? true,
+      pinyinScale: _readDouble(sp, _keyPinyinScale) ?? 1.0,
       configVersion: kCurrentConfigVersion,
     );
   }
@@ -620,6 +640,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
     await sp.setBool(_scoped(_keyLibraryGridView), prefs.libraryGridView);
     await sp.setBool(_scoped(_keyScrubberHaptics), prefs.scrubberHaptics);
     await sp.setBool(_scoped(_keyLessonLoop), prefs.lessonLoop);
+    await sp.setDouble(_scoped(_keyPinyinScale), prefs.pinyinScale);
     await sp.setInt(_keyConfigVersion, prefs.configVersion);
   }
 }
@@ -661,6 +682,7 @@ class PreferencesController extends ChangeNotifier {
     bool? libraryGridView,
     bool? scrubberHaptics,
     bool? lessonLoop,
+    double? pinyinScale,
   }) async {
     _prefs = _prefs.copyWith(
       themeMode: themeMode,
@@ -668,6 +690,7 @@ class PreferencesController extends ChangeNotifier {
       learningFont: learningFont,
       learningChineseFont: learningChineseFont,
       textScale: textScale,
+      pinyinScale: pinyinScale,
       uiLanguage: uiLanguage,
       translationBaseUrl: translationBaseUrl,
       translationApiKey: translationApiKey,

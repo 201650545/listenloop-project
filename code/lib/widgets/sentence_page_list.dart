@@ -95,10 +95,26 @@ class _SentencePageListState extends State<SentencePageList>
       // 切句发生时，无论之前是否划动过，立即解除阻断让动画跟上新句子
       _userScrolling = false;
       _resumeTimer?.cancel();
+      // 2026-10-20 郭老师：「像音乐播放器播放音乐展示歌词一样，显示当前所听
+      // 句子的形状，应该**固定**在人看手机的视觉中心区」。
+      //
+      // 所以每句都要重新锚一次 —— 锚的是**形状的底边**（压在屏幕中线上）：
+      // 音频往前走 → 列表往下滚 → 字幕整列向上流过去，而那个"当前句形状"
+      // 原地不动地钉在中心区。这就是歌词模式。
+      //
+      // （我一度改成"形状自己往下走、列表最小滚动"，那是反的：形状会跑偏。）
       _autoScrollToIndex(newIndex);
     } else if (!identical(widget.sentences, oldWidget.sentences)) {
       _fromIndex = null;
       _transition.reset();
+      // 2026-10-20 郭老师：「字幕当前播放句子的形状标注位置错了」——
+      // 课文数据是**异步**到的：列表先渲染旧句（甚至空），数据到位后句子
+      // 列表整体换掉，但 currentIndex 没变 ⇒ 上面那个"索引变了"的分支不会
+      // 触发 ⇒ 形状从来没被摆正过，列表停在 PageStorage 恢复出来的旧位置
+      // （于是当前句 15 在屏外，只看得见 7~12）。
+      // 数据换新 = 必须重新摆一次形状。
+      _userScrolling = false;
+      _autoScrollToIndex(widget.currentIndex);
     }
     if (widget.revealToken != oldWidget.revealToken) {
       _userScrolling = false;
@@ -131,8 +147,7 @@ class _SentencePageListState extends State<SentencePageList>
         if (attempt < 8) _alignToIndex(index, attempt: attempt + 1);
         return;
       }
-      if (_userScrolling) return;
-      final position = _scrollController.position;
+      if (_userScrolling) return;      final position = _scrollController.position;
       final headerExtent = widget.header != null ? 120.0 : 0.0;
 
       // Correction: find any mounted row and compare its real document
@@ -146,7 +161,8 @@ class _SentencePageListState extends State<SentencePageList>
         final rowTopInViewport = box.localToGlobal(Offset.zero).dy;
         final i = widget.itemKeys.indexOf(key);
         final rowDocOffset = _scrollController.offset + rowTopInViewport;
-        final rowEstimate = i * _estimatedRowHeight + headerExtent;
+        final rowEstimate =
+            i * _estimatedRowHeight + headerExtent + _topSpacerExtent();
         correction = rowDocOffset - rowEstimate;
         break;
       }
@@ -156,14 +172,16 @@ class _SentencePageListState extends State<SentencePageList>
           ? widget.itemKeys[index].currentContext
           : null;
       if (mountedCtx != null) {
-        _scrollRowToScreenMiddle(mountedCtx, animate: true);
+        _alignRowIntoShape(mountedCtx);
+        _settleOnScreenMiddle(index);
         return;
       }
 
-      // 估算路径：还没挂载，先按"卡片底边落屏幕中线"反推目标滚动量。
+      // 估算路径：还没挂载，先按"形状底边落屏幕中线"反推目标滚动量。
       final estRowHeight = _estimatedRowHeight;
       final target =
           ((index * estRowHeight) +
+                  _topSpacerExtent() +
                   headerExtent +
                   correction -
                   _desiredRowTopInViewport(estRowHeight))
@@ -177,7 +195,7 @@ class _SentencePageListState extends State<SentencePageList>
             ? widget.itemKeys[index].currentContext
             : null;
         if (ctx != null) {
-          _scrollRowToScreenMiddle(ctx, animate: true);
+          _alignRowIntoShape(ctx);
         } else if (attempt < 4) {
           _alignToIndex(index, attempt: attempt + 1);
         }
@@ -185,57 +203,53 @@ class _SentencePageListState extends State<SentencePageList>
     });
   }
 
-  /// 把这一行滚到**手机屏幕中线**上（卡片底边 = 屏幕中线）。
+  /// 落位自校正：布局稳定后再校准一次。
   ///
-  /// 2026-10-20 郭老师：「初读时定位字幕的形状有点偏上，应该再下来一点，
-  /// 形状的底与**画面中线**重合」——"中线"指**手机屏幕**的中线。
-  ///
-  /// 做法：拿**屏幕绝对坐标**算差值，而不是"视口比例"。
-  /// ① 视口比例要先知道视口顶边在屏幕的哪儿，还要 clamp，误差会攒到
-  ///    几十像素（实测偏了 52px）；
-  /// ② 绝对坐标法只依赖两件事——卡片当前在屏幕的哪儿、屏幕多高 ——
-  ///    差多少滚多少，**像素级准**。
-  void _scrollRowToScreenMiddle(BuildContext rowContext, {required bool animate}) {
-    final box = rowContext.findRenderObject();
-    if (box is! RenderBox || !box.attached || !box.hasSize) return;
-    if (!_scrollController.hasClients) return;
-    final view = View.of(rowContext);
-    // 屏幕（窗口）高度，逻辑像素。不用 MediaQuery.sizeOf —— 它可能已被
-    // SafeArea 之类的上层裁过，拿不到"整块屏幕"的中线。
-    final screenHeight = view.physicalSize.height / view.devicePixelRatio;
-    final rowTop = box.localToGlobal(Offset.zero).dy;
-    final targetTop = screenHeight / 2 - box.size.height;
-    final delta = targetTop - rowTop;
-    if (delta.abs() < 0.5) return;
-    final position = _scrollController.position;
-    final target = (position.pixels + delta).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    if (animate) {
-      _scrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
+  /// 2026-10-20（灰色形状改为跟随当前句后）：目标不再是"对齐到固定形状的
+  /// 上沿"，而是"把当前句对齐到屏幕的上三分之一"。
+  /// 实测第一版只对齐一次**不够**：对齐之后布局还会变（视频区展开会把
+  /// 句子列表整体下推约 200px；模式切换、状态栏显隐同理）⇒ 刚对好的位置
+  /// 又偏了。所以这里在动画结束后连续几帧重新量一次，差多少补多少，
+  /// 直到落位（最多 4 轮）。
+  void _settleOnScreenMiddle(int index) {
+    var round = 0;
+    void step() {
+      if (!mounted || _userScrolling || round >= 4) return;
+      round++;
+      final ctx = (index >= 0 && index < widget.itemKeys.length)
+          ? widget.itemKeys[index].currentContext
+          : null;
+      if (ctx == null) return;
+      final box = ctx.findRenderObject();
+      if (box is! RenderBox || !box.attached || !box.hasSize) return;
+      if (!_scrollController.hasClients) return;
+      // 目标：当前句的上沿落在屏幕的上三分之一。
+      final targetTop = _desiredRowTopInViewport(box.size.height);
+      final rowTop = box.localToGlobal(Offset.zero).dy;
+      final delta = targetTop - (rowTop - _viewportTop());
+      if (delta.abs() < 2) return; // 已经落位
+      final position = _scrollController.position;
+      final target = (position.pixels - delta).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
       );
-    } else {
       _scrollController.jumpTo(target);
+      Future<void>.delayed(const Duration(milliseconds: 120), step);
     }
+
+    Future<void>.delayed(const Duration(milliseconds: 260), step);
   }
+
+  /// 列表顶部余量（半屏）—— 让第一句也能滚到上三分之一。
+  double _topSpacerExtent() => MediaQuery.sizeOf(context).height * 0.5;
 
   /// 当前句卡片应该落在什么位置。
   ///
-  /// 2026-10-20 郭老师：「初读时定位字幕的形状有点偏上，应该再下来一点，
-  /// 形状的底与**画面中线**重合」——这里的"中线"指**手机屏幕**的中线
-  /// （不是字幕区自己的中线）。所以拿**屏幕高度**算：卡片底边 = 屏幕高的一半。
+  /// 2026-10-20（灰色形状改为跟随当前句后）：不再有"钉在中线的固定形状"
+  /// 可对齐 ⇒ 改为把**当前句本身**对齐到视口的**上三分之一**（与读页
+  /// LessonReadingDocument 同一把尺：人的视线习惯落在画面中上部分）。
   ///
-  /// 卡片上沿在视口里的目标位置（视口坐标，px）。
-  ///
-  /// 卡片底边要落在**手机屏幕**的中线 → 上沿 = 屏幕中线 − 卡片高；
-  /// 再减去视口顶边在屏幕坐标里的位置，换算成视口内坐标。
-  ///
-  /// 屏幕高度取 [View] 的物理尺寸（整块屏，不受 SafeArea 裁剪影响），
-  /// 与 [_scrollRowToScreenMiddle] 用的是同一把尺。
+  /// 旧算法（对齐到固定形状上沿 / 屏幕中线）已随固定形状一起作废。
   double _desiredRowTopInViewport(double rowHeight) {
     final view = View.of(context);
     final screenHeight = view.physicalSize.height / view.devicePixelRatio;
@@ -245,8 +259,12 @@ class _SentencePageListState extends State<SentencePageList>
     if (viewportBox is RenderBox && viewportBox.attached && viewportBox.hasSize) {
       viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
     }
-    return screenHeight / 2 - rowHeight - viewportTop;
+    // 上三分之一：视口高的 28% 处（读页用的是同一个比例）。
+    return screenHeight * _focusScreenFraction - viewportTop;
   }
+
+  /// 当前句落在屏幕高度的哪个比例上（上三分之一 = 视觉中心区）。
+  static const double _focusScreenFraction = 0.28;
 
   @override
   void initState() {
@@ -300,7 +318,9 @@ class _SentencePageListState extends State<SentencePageList>
     if (bestIndex != -1) return bestIndex;
 
     final est =
-        ((offset + focusY - headerExtent) / _estimatedRowHeight).round();
+        ((offset + focusY - headerExtent - _topSpacerExtent()) /
+                _estimatedRowHeight)
+            .round();
     return est.clamp(0, widget.sentences.length - 1);
   }
 
@@ -324,26 +344,83 @@ class _SentencePageListState extends State<SentencePageList>
     return false;
   }
 
+  /// 把某一行的**上沿**对齐到屏幕的上三分之一（当前句的视觉中心位）。
+  ///
+  /// 2026-10-20（灰色形状改为跟随当前句后）：不再有"固定形状"可对齐 ⇒
+  /// 改为把当前句本身滚到上三分之一，形状跟着它走。
+  void _alignRowIntoShape(BuildContext rowContext) {
+    final box = rowContext.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return;
+    if (!_scrollController.hasClients) return;
+    final targetTop = _desiredRowTopInViewport(box.size.height);
+    final rowTop = box.localToGlobal(Offset.zero).dy;
+    final currentInViewport = rowTop - _viewportTop();
+    final delta = targetTop - currentInViewport;
+    if (delta.abs() < 0.5) return;
+    final position = _scrollController.position;
+    final target = (position.pixels - delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  double _viewportTop() {
+    final box = context.findRenderObject();
+    if (box is RenderBox && box.attached && box.hasSize) {
+      return box.localToGlobal(Offset.zero).dy;
+    }
+    return 0.0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasHeader = widget.header != null;
-    final totalCount = widget.sentences.length + (hasHeader ? 1 : 0) + 1;
+    // 2026-10-20 郭老师（音乐播放器式歌词）：当前句的**形状**要钉在屏幕
+    // 中线上，别的句子在它下面流过去。
+    //
+    // 要做到"每一句"都能钉在中线上，列表**上下都得留半屏余量**：
+    //  · 底部余量：最后一句下面没东西可滚 ⇒ 形状永远停在屏幕下缘；
+    //  · 顶部余量：第一句上面没东西可滚 ⇒ 形状永远停在屏幕顶附近。
+    // 少了任何一头，被锚定的那句就会差半个屏幕。
+    final halfScreen = MediaQuery.sizeOf(context).height * 0.5;
+    final totalCount =
+        widget.sentences.length + (hasHeader ? 1 : 0) + 2; // +上下余量
 
     return NotificationListener<ScrollNotification>(
       onNotification: _onNotification,
-      child: ListView.builder(
-        controller: _scrollController,
-        itemCount: totalCount,
-        itemBuilder: (context, index) {
-          if (hasHeader && index == 0) {
-            return widget.header!;
-          }
-          final lastIndex = totalCount - 1;
-          if (index == lastIndex) {
-            return const SizedBox(height: LLSpacing.huge);
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
+            children: [
+              // ① 当前句的**形状**：2026-10-20 改为**跟随当前句**（原先是钉在
+              // 屏幕中线上的固定聚光块，见郭老师「它不动感觉怪怪的」）。
+              // ⇒ 形状画在**当前句那一行**里（见 _SentenceRow 的 decoration），
+              // 这里不再叠一块固定块。
+              //
+              // ② 字幕（滚动的）
+              ListView.builder(
+                controller: _scrollController,
+                itemCount: totalCount,
+                itemBuilder: (context, index) {
+                  // index 0 = 顶部余量
+                  if (index == 0) {
+                    return SizedBox(height: halfScreen);
+                  }
+                  if (hasHeader && index == 1) {
+                    return widget.header!;
+                  }
+                  final lastIndex = totalCount - 1;
+                  if (index == lastIndex) {
+            // 底部余量
+            return SizedBox(height: halfScreen);
           }
 
-          final sentenceIndex = hasHeader ? index - 1 : index;
+          final sentenceIndex = hasHeader ? index - 2 : index - 1;
           final sentence = widget.sentences[sentenceIndex];
           final rowWidget = _animatedRow(sentenceIndex, sentence);
 
@@ -403,6 +480,10 @@ class _SentencePageListState extends State<SentencePageList>
           }
 
           return rowWidget;
+                },
+              ),
+            ],
+          );
         },
       ),
     );
@@ -481,33 +562,41 @@ class _SentenceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ll = palette;
-    final shape = context.llShape;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
       // 2026-10-20（GPT 镜像评审 §四 P2）：**句子不是卡片流，是课文段落**。
-      // 未选中的句子不画底、不画框、不画圆角，只靠留白分开；只有当前句
-      // 拿到极浅的底和一条 2dp 强调线。原来每句都是圆角卡片（连未选中的
-      // 都铺一层 0.02 的底），整页看着像一串聊天记录，不像在翻课文。
-      margin: EdgeInsets.symmetric(vertical: isCurrent ? 2 : 6),
-      padding: EdgeInsets.only(left: isCurrent ? 10 : 0),
+      // 未选中的句子不画底、不画框、不画圆角，只靠留白分开。
+      //
+      // ⚠️ 但**所有行的外边距、左侧留白、边框宽度必须完全一致**：
+      // 2026-10-20 郭老师报「字幕当前播放句子的形状标注位置错了」+「音频往
+      // 后面走，字幕却往上面走」—— 根因就是这里：当前句原本有**更大的竖向
+      // 外边距**（句子之间留白多）和**额外的左内边距**（形状往右挪），
+      // 于是"当前态"一变，整列字幕先横向错位、再纵向爬 4~8px。
+      //
+      // 2026-10-20（郭老师：「读的那个页面字幕，灰色形状改为跟随吧……
+      // 它不动感觉怪怪的」）：灰色形状**改为跟随当前句**（不再是钉在屏幕
+      // 中线的那块固定聚光块）。做法与读页同一套视觉语言：当前句那行
+      // 浅底 + 左侧 2dp 强调线，别的行干净。
+      //
+      // 为守住"一行都不抖"：**所有行的几何完全一致**——外边距、左内边距、
+      // 边框宽度恒定，只换颜色。不换颜色的行画的是**透明**边框（宽度仍是
+      // 2dp），绝不能写 `width: 0`（那是 hairline，配圆角会 paint 断言
+      // 失败 ⇒ 整行画不出来）。
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.zero,
       decoration: BoxDecoration(
         color: isCurrent
-            ? ll.textPrimary.withValues(alpha: 0.05)
+            ? ll.textPrimary.withValues(alpha: 0.055)
             : Colors.transparent,
-        borderRadius: isCurrent
-            ? BorderRadius.circular(LLRadius.small)
-            : BorderRadius.zero,
+        borderRadius: const BorderRadius.all(Radius.circular(10)),
         border: Border(
-          left: isCurrent
-              // 选中框粗细吃 `shape.rule`——这是该令牌的设计用途
-              // （"Emphasis border width (当前句选中框)"）。此前这里写死 3，
-              // 于是书院那套 `rule: 2` 的"双线"语言在全库零处生效。
-              //
-              // 未选中必须是 BorderSide.none 而不是 width: 0 —— 后者会让
-              // RenderDecoratedBox.paint 抛断言（BorderSide 要求 width > 0）。
-              ? BorderSide(width: shape.rule, color: ll.textPrimary)
-              : BorderSide.none,
+          left: BorderSide(
+            width: 2,
+            color: isCurrent
+                ? ll.textPrimary.withValues(alpha: 0.75)
+                : Colors.transparent,
+          ),
         ),
       ),
       child: InkWell(
@@ -538,6 +627,7 @@ class _SentenceRow extends StatelessWidget {
                       color: isCurrent ? ll.textPrimary : ll.textSecondary,
                     ),
                     chineseFontFamily: preferences.learningChineseFont.family,
+                    pinyinScale: preferences.pinyinScale,
                     textAlign: TextAlign.left,
                     wordSpacing: 6.0,
                     lineSpacing: 10.0,

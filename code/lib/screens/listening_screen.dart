@@ -78,10 +78,17 @@ class ListeningScreen extends StatefulWidget {
     this.readAlongSpeakerFactory,
     this.onReadAlongChanged,
     this.onRequestReadAlongTab,
+    this.onImmersiveChanged,
   });
 
   /// 请求切到底栏的独立跟读一级 Tab（告别弹出式 / Overlay）
   final VoidCallback? onRequestReadAlongTab;
+
+  /// 2026-10-20 郭老师：全屏播放（沉浸模式）。
+  ///
+  /// 沉浸时**所有组件**都收起：顶栏、播放控件栏、底部导航。底部导航在
+  /// 宿主 Shell 里，所以这一层要通知宿主一起收。
+  final ValueChanged<bool>? onImmersiveChanged;
 
   /// 当跟读模式状态变化（开启/退出）时通知宿主 Shell
   final ValueChanged<bool>? onReadAlongChanged;
@@ -193,6 +200,70 @@ class ListeningScreenState extends State<ListeningScreen>
   /// Bumped to ask SentencePageList to re-align to the current sentence
   /// (tab re-entry via revealCurrentSentence, presentation-mode switch).
   int _revealToken = 0;
+
+  // ── 全屏播放（沉浸模式）2026-10-20 郭老师 ──────────────────────
+  //
+  // 「当用户所有的配置都设置好之后，可以设计一个全屏播放的效果，也就是所有
+  // 组件都自动收起」——像听歌时那样，屏幕只剩课文。
+  //
+  // 两种进入方式，**行为不同**：
+  //  · 手动进（⛶ 按钮）：用户自己选的 ⇒ 点屏幕只是**临时**把组件唤出来看
+  //    几秒，然后自动收回；想彻底退出要点 ⛶。
+  //  · 30 秒无操作自动进：系统收的 ⇒ 点屏幕**立刻退出沉浸**（组件弹回
+  //    来），因为这时候用户显然想操作。
+  bool _immersive = false;
+  bool _immersiveAuto = false;
+  DateTime? _chromePeekUntil;
+  Timer? _immersiveTimer;
+  Timer? _peekTimer;
+
+  static const Duration _immersiveIdle = Duration(seconds: 30);
+  static const Duration _peekDuration = Duration(seconds: 4);
+
+  /// 组件此刻是否可见。
+  bool get _chromeVisible =>
+      !_immersive || (_chromePeekUntil?.isAfter(DateTime.now()) ?? false);
+
+  /// 收起 / 展开全部组件。[auto] = true 表示"自动进入"（轻模式）。
+  void _setImmersive(bool value, {required bool auto}) {
+    _immersiveTimer?.cancel();
+    _peekTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _immersive = value;
+      _immersiveAuto = auto;
+      _chromePeekUntil = null;
+    });
+    widget.onImmersiveChanged?.call(value);
+    if (!value) _armImmersiveTimer();
+  }
+
+  /// 30 秒无操作 → 自动进入沉浸。
+  void _armImmersiveTimer() {
+    _immersiveTimer?.cancel();
+    if (_immersive) return;
+    _immersiveTimer = Timer(_immersiveIdle, () {
+      if (!mounted || _immersive) return;
+      _setImmersive(true, auto: true);
+    });
+  }
+
+  /// 任何一次触摸：自动模式直接退出沉浸；手动模式临时唤出组件。
+  void _onUserInteraction() {
+    _immersiveTimer?.cancel();
+    if (_immersive) {
+      if (_immersiveAuto) {
+        _setImmersive(false, auto: false);
+        return;
+      }
+      _peekTimer?.cancel();
+      setState(() => _chromePeekUntil = DateTime.now().add(_peekDuration));
+      _peekTimer = Timer(_peekDuration, () {
+        if (mounted) setState(() => _chromePeekUntil = null);
+      });
+    }
+    _armImmersiveTimer();
+  }
 
   /// Whether the current lesson belongs to the Chinese curriculum / language.
   bool get _isChinese {
@@ -1437,6 +1508,9 @@ class ListeningScreenState extends State<ListeningScreen>
     }
     _loadPlaylistLessons();
     _controller.addListener(_onControllerChanged);
+    // 2026-10-20 全屏播放：30 秒无操作自动进沉浸。只在**正在播**的时候
+    // 计时（暂停着没人看，屏保一样的东西没意义）。
+    _armImmersiveTimer();
     // V2 §三十二: the shell can reach the active controller (pause when the
     // user opens Settings) without exposing the playback architecture.
     widget.onControllerCreated?.call(_controller);
@@ -1510,6 +1584,13 @@ class ListeningScreenState extends State<ListeningScreen>
         _lastSentenceIndex = curIdx;
       }
       _syncOrientation();
+      // 2026-10-20 全屏播放：只在播放中计时；一停就撤掉（暂停时自动进
+      // 沉浸没道理 —— 人都没在听）。
+      if (_controller.isPlaying) {
+        _armImmersiveTimer();
+      } else {
+        _immersiveTimer?.cancel();
+      }
       setState(() {});
     }
   }
@@ -1531,6 +1612,8 @@ class ListeningScreenState extends State<ListeningScreen>
     WidgetsBinding.instance.removeObserver(this);
     _leftLongPressTimer?.cancel();
     _scrubberHideTimer?.cancel();
+    _immersiveTimer?.cancel();
+    _peekTimer?.cancel();
     _controller.removeListener(_onControllerChanged);
     // 视听模式放开过旋转，别把它带出这一页 —— 离开精听页收回竖屏。
     SystemChrome.setPreferredOrientations(const [
@@ -1903,7 +1986,12 @@ class ListeningScreenState extends State<ListeningScreen>
       value: llSystemOverlay(ll.brightness),
       child: Scaffold(
         backgroundColor: ll.bg,
-        body: LLBackdrop(child: SafeArea(
+        // 2026-10-20 郭老师：全屏播放。Listener 放在最外层，这样**任何**
+        // 一次触摸（含滑动、点按钮）都会被记成"用户有操作"，30 秒计时重置。
+        body: LLBackdrop(child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (_) => _onUserInteraction(),
+          child: SafeArea(
           // Horizontal swipe anywhere switches sentences: left→right =
           // previous, right→left = next (user request 2026-09-16).
           child: GestureDetector(
@@ -1922,10 +2010,12 @@ class ListeningScreenState extends State<ListeningScreen>
               children: [
                 // V2 follow-up: no title up top — the counter and the
                 // presentation toggle sit centred, quiet.
+                //
+                // 2026-10-20 全屏播放：沉浸时顶栏整条收起。
+                if (_chromeVisible)
                 ListeningTopBar(
                   displayIndex: controller.displayIndex,
-                  sentenceCount: controller.sentenceCount,
-                  leading: Row(
+                  sentenceCount: controller.sentenceCount,                  leading: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (!_isChinese)
@@ -1977,7 +2067,21 @@ class ListeningScreenState extends State<ListeningScreen>
                   // 课文目录/显示模式）、左槽 1 枚 AI 伴学。原先两侧共用
                   // slotWidth 且取较大值，会把一侧顶出屏幕（溢出 48/56px）。
                   leadingSlotWidth: _isChinese ? 132 : 48,
-                  trailingSlotWidth: _isChinese ? 144 : 192,
+                  // 2026-10-20：右槽现在有 4 枚（视频▶ / 课文目录 / 显示模式 /
+                  // 全屏⛶），槽宽必须是 4×48=192 —— 原来按 3 枚留 144，第 4 枚
+                  // 被顶出屏幕（小米 Ultra 实测「RIGHT OVERFLOWED BY 48
+                  // PIXELS」），⛶ 也就看不见了。
+                  //
+                  // 但槽宽**不能写死**：英文课右槽是 5 枚（听写 / more /
+                  // 课文目录 / 显示模式 / 全屏⛶），5×48=240，硬留 192 就会
+                  // 「overflowed by 48 pixels on the right」（单测里抓到的就是
+                  // 这一条 —— 中文课 4 枚碰巧不露，英文课一开就露）。
+                  // ⇒ 槽宽按**实际枚数**算，中文/英文各算各的。
+                  trailingSlotWidth:
+                      (_isChinese
+                              ? (controller.hasVideoSource ? 4 : 3)
+                              : 5) *
+                          48.0,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -2064,9 +2168,28 @@ class ListeningScreenState extends State<ListeningScreen>
                       _revealToken++;
                     }),
                   ),
-                    ],
-                  ),
+                    // 2026-10-20 郭老师：全屏播放（沉浸模式）—— 手动进。
+                    // 所有组件（顶栏 / 播放控件栏 / 底部导航）自动收起，
+                    // 只留课文与逐字高亮。
+                    IconButton(
+                      key: const Key('immersive-button'),
+                      tooltip: '全屏播放',
+                      icon: Icon(
+                        _immersive
+                            ? Icons.fullscreen_exit_rounded
+                            : Icons.fullscreen_rounded,
+                        size: 20,
+                        color: ll.textSecondary,
+                      ),
+                      onPressed: () =>
+                          _setImmersive(!_immersive, auto: false),
+                    ),
+                  ],
                 ),
+              )
+                else
+                // 沉浸模式：只留一枚半透明的退出钮（见 _buildImmersiveBar）。
+                _buildImmersiveBar(context, ll),
                 // 2026-10-20 郭老师：删掉听读页的封面。音频模式不再保留媒体区
                 // （原来那块是"封面 + ∞ 标记"，纯标识，却吃掉近 1/4 竖屏，
                 // 把课文句子挤到下面）；现在这段高度整块归课文句子。
@@ -2206,6 +2329,9 @@ class ListeningScreenState extends State<ListeningScreen>
                 // 字幕选择器）收敛为一个底座 LLAudioControlBar。回调全部
                 // 透传既有 controller 方法与 Sheet，播放/断句逻辑零改动；
                 // 顶部细线为当前句进度（控制器无公开 seek，故仅展示）。
+                //
+                // 2026-10-20 全屏播放：沉浸时整条底座也收起。
+                if (_chromeVisible)
                 Padding(
                   // 2026-10-20（GPT 镜像评审 §四 P2）：底座**铺满整宽**，
                   // 外面不再用左右留边把它塑造成一张独立卡片 —— 它应该是
@@ -2270,7 +2396,28 @@ class ListeningScreenState extends State<ListeningScreen>
               ],
             ),
           ),
-        )),
+        ))),
+      ),
+    );
+  }
+
+  /// 沉浸模式下唯一留下的一枚按钮：退出全屏。
+  ///
+  /// 2026-10-20 郭老师：全屏播放要把组件都收起来，但**不能收得连出口都
+  /// 没有** —— 所以留一枚半透明的 ⛶ 在右上角（自动进入时，点屏幕任意处
+  /// 也会直接退出，见 [_onUserInteraction]）。
+  Widget _buildImmersiveBar(BuildContext context, LLPalette ll) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: IconButton(
+        key: const Key('immersive-exit-button'),
+        tooltip: '退出全屏',
+        icon: Icon(
+          Icons.fullscreen_exit_rounded,
+          size: 20,
+          color: ll.textTertiary.withValues(alpha: 0.55),
+        ),
+        onPressed: () => _setImmersive(false, auto: false),
       ),
     );
   }
