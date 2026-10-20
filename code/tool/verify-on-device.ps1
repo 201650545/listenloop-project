@@ -21,6 +21,7 @@
 param(
     [string]$Device = '',
     [switch]$SkipBuild,
+    [switch]$AutoDiscover,
     [switch]$KeepSession
 )
 
@@ -39,9 +40,41 @@ if ($Device) {
     Start-Sleep -Seconds 2
 }
 $devices = @(& $adb devices | Select-Object -Skip 1 | Where-Object { $_ -match '\tdevice$' })
+
+# 自动发现：手机在同网段但 adb 没连上 ⇒ 扫同网段的常见无线调试端口。
+# ⚠️ 2026-10-21 实测：手机给的地址 192.168.2.5:33217 与本机 192.168.128.x
+#    **不同网段**，路由表里没有到 192.168.2.x 的路由 ⇒ 无论重试多少次都连不上
+#    （ping 也不通）。这不是 adb 的问题，是**两个网段不通**。
+#    ⇒ 手机必须连到本机所在的 192.168.128.x 那个 Wi-Fi。
+if ($devices.Count -eq 0 -and $AutoDiscover) {
+    $myIp = (Get-NetIPAddress -AddressFamily IPv4 |
+             Where-Object { $_.InterfaceAlias -eq 'WLAN' } |
+             Select-Object -First 1).IPAddress
+    $prefix = ($myIp -split '\.')[0..2] -join '.'
+    Write-Host "      自动扫描 $prefix.0/24 的常见 adb 端口…"
+    foreach ($last in 1..254) {
+        $ip = "$prefix.$last"
+        if ($ip -eq $myIp) { continue }
+        foreach ($port in @(5555)) {
+            $probe = Test-NetConnection -ComputerName $ip -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue
+            if ($probe) {
+                $out = & $adb connect "$ip`:$port" 2>&1
+                if ("$out" -match 'connected') {
+                    Write-Host "      找到设备 $ip`:$port"
+                    $devices = @(& $adb devices | Select-Object -Skip 1 | Where-Object { $_ -match '\tdevice$' })
+                    break
+                }
+            }
+        }
+        if ($devices.Count -gt 0) { break }
+    }
+}
+
 if ($devices.Count -eq 0) {
-    Write-Host "[FAIL] 没有可用设备。手机要与本机同一 Wi-Fi 且开启无线调试。"
-    Write-Host "       本机 IP: $((Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -eq 'WLAN' } | Select-Object -First 1).IPAddress)"
+    Write-Host "[FAIL] 没有可用设备。"
+    Write-Host "       ⇒ 手机必须与本机在**同一网段**（本机 WLAN: $((Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -eq 'WLAN' } | Select-Object -First 1).IPAddress)）"
+    Write-Host "       ⇒ 且开启「无线调试」。给到正确地址后重跑："
+    Write-Host "          .\tool\verify-on-device.ps1 -Device <ip:port>"
     exit 1
 }
 $serial = ($devices[0] -split '\s+')[0]
