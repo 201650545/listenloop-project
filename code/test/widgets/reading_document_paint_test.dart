@@ -18,11 +18,23 @@
 //   （首次建立基准图：加 --update-goldens；**不要**日常用，会失去防回归意义）
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle, FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:phrasing/models/sentence.dart';
 import 'package:phrasing/theme/listenloop_theme.dart';
 import 'package:phrasing/training/continuous_reading_session.dart';
 import 'package:phrasing/widgets/lesson_reading_document.dart';
+
+/// 加载真实中文字体（SongTi）。
+///
+/// ⚠️ 不加载的话，flutter_test 默认用 **Ahem 测试字体**，所有汉字渲染成方块
+/// ⇒ golden 基线图看不出任何字形变化 ⇒ 视觉回归等于白做。
+/// （2026-10-21 GPT 镜像站评审明确提醒过这个坑）
+Future<void> loadChineseFont() async {
+  final loader = FontLoader('SongTi')
+    ..addFont(rootBundle.load('assets/fonts/SongTi.ttf'));
+  await loader.load();
+}
 
 /// 真机课包 xiaokedou-b-dual 的 69 句真实课文（逐字照抄）。
 const List<String> kRealLessonText = [
@@ -242,6 +254,9 @@ void main() {
   });
 
   testWidgets('golden：读页首屏（当前句 + 上下文）像素级基线', (tester) async {
+    // 加载真实中文字体，否则 golden 全是方块、视觉回归无意义。
+    await loadChineseFont();
+
     final sentences = buildRealSentences();
     await pumpDocument(
       tester,
