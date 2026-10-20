@@ -103,114 +103,112 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: LLSpacing.xxl),
 
-          // ③ 纸与光
-          _SettingsHubCard(
-            icon: Icons.auto_stories_outlined,
-            title: zh ? '纸与光' : 'Paper & Light',
-            summary: zh
-                ? '${prefs.style.label(zh)} · ${switch (prefs.themeMode) {
-                    ThemeMode.system => '跟随系统',
-                    ThemeMode.light => '白昼',
-                    ThemeMode.dark => '黑夜',
-                  }}'
-                : '${prefs.style.label(zh)} · ${switch (prefs.themeMode) {
-                    ThemeMode.system => 'System',
-                    ThemeMode.light => 'Light',
-                    ThemeMode.dark => 'Dark',
-                  }}',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => PreferencesScope(
-                  controller: controller,
-                  child: _PaperAndLightDetailPage(
-                    controller: controller,
-                    zh: zh,
+          // ③ 功能目录
+          //
+          // 2026-10-20（GPT 镜像评审 §四 P3）：设置首页应当像**目录**，不像
+          // 一列互相分离的海报。原来每个功能各自一张卡（同样的重量、同样的
+          // 圆角、同样的阴影），于是"组件形状不协调"。现在：功能项收进
+          // **同一张卡**，组内用发丝线分隔；进二级页后才用卡片去装真正需要
+          // 实体容器的内容（风格预览、字体样张……）。
+          _SettingsHubGroup(
+            items: [
+              (
+                icon: Icons.auto_stories_outlined,
+                title: zh ? '纸与光' : 'Paper & Light',
+                summary: zh
+                    ? '${prefs.style.label(zh)} · ${switch (prefs.themeMode) {
+                        ThemeMode.system => '跟随系统',
+                        ThemeMode.light => '白昼',
+                        ThemeMode.dark => '黑夜',
+                      }}'
+                    : '${prefs.style.label(zh)} · ${switch (prefs.themeMode) {
+                        ThemeMode.system => 'System',
+                        ThemeMode.light => 'Light',
+                        ThemeMode.dark => 'Dark',
+                      }}',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PreferencesScope(
+                      controller: controller,
+                      child: _PaperAndLightDetailPage(
+                        controller: controller,
+                        zh: zh,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: LLSpacing.md),
-
-          // ④ 字与读
-          _SettingsHubCard(
-            icon: Icons.format_size_rounded,
-            title: zh ? '字与读' : 'Typography & Reading',
-            summary: zh
-                ? '字号 ${(prefs.textScale * 100).round()}% · 中文 ${prefs.learningChineseFont.label} · 英文 ${prefs.learningFont.label}'
-                : 'Size ${(prefs.textScale * 100).round()}% · ${prefs.learningChineseFont.label} · ${prefs.learningFont.label}',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => PreferencesScope(
-                  controller: controller,
-                  child: _TypographyDetailPage(
-                    controller: controller,
-                    zh: zh,
+              (
+                icon: Icons.format_size_rounded,
+                title: zh ? '字与读' : 'Typography & Reading',
+                summary: zh
+                    ? '字号 ${(prefs.textScale * 100).round()}% · 中文 ${prefs.learningChineseFont.label} · 英文 ${prefs.learningFont.label}'
+                    : 'Size ${(prefs.textScale * 100).round()}% · ${prefs.learningChineseFont.label} · ${prefs.learningFont.label}',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PreferencesScope(
+                      controller: controller,
+                      child: _TypographyDetailPage(
+                        controller: controller,
+                        zh: zh,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: LLSpacing.md),
-
-          // ⑤ 跟读与纠音
-          _SettingsHubCard(
-            icon: Icons.record_voice_over_outlined,
-            title: zh ? '跟读与纠音' : 'Read-Along & Speech',
-            summary: zh
-                ? '识别 ${prefs.asrTier == AsrTier.precise ? "精准" : "快速"} · 触感 ${prefs.scrubberHaptics ? "开启" : "关闭"}'
-                : 'ASR ${prefs.asrTier == AsrTier.precise ? "Precise" : "Fast"} · Haptics ${prefs.scrubberHaptics ? "On" : "Off"}',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => PreferencesScope(
-                  controller: controller,
-                  child: _ReadAlongDetailPage(
-                    controller: controller,
-                    zh: zh,
+              (
+                icon: Icons.record_voice_over_outlined,
+                title: zh ? '跟读与纠音' : 'Read-Along & Speech',
+                summary: zh
+                    ? '识别 ${prefs.asrTier == AsrTier.precise ? "精准" : "快速"} · 触感 ${prefs.scrubberHaptics ? "开启" : "关闭"}'
+                    : 'ASR ${prefs.asrTier == AsrTier.precise ? "Precise" : "Fast"} · Haptics ${prefs.scrubberHaptics ? "On" : "Off"}',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PreferencesScope(
+                      controller: controller,
+                      child: _ReadAlongDetailPage(
+                        controller: controller,
+                        zh: zh,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: LLSpacing.md),
-
-          // ⑥ 课件与存储
-          _SettingsHubCard(
-            icon: Icons.inventory_2_outlined,
-            title: zh ? '课件与存储' : 'Courseware & Storage',
-            summary: zh ? '管理本地缓存与课件空间' : 'Manage local cache & storage',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => PreferencesScope(
-                  controller: controller,
-                  child: _StorageDetailPage(
-                    repository: repository,
-                    zh: zh,
+              (
+                icon: Icons.inventory_2_outlined,
+                title: zh ? '课件与存储' : 'Courseware & Storage',
+                summary: zh ? '管理本地缓存与课件空间' : 'Manage local cache & storage',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PreferencesScope(
+                      controller: controller,
+                      child: _StorageDetailPage(
+                        repository: repository,
+                        zh: zh,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: LLSpacing.md),
-
-          // ⑦ 网络与模型
-          _SettingsHubCard(
-            icon: Icons.hub_outlined,
-            title: zh ? '网络与模型' : 'Network & Models',
-            summary: zh
-                ? 'AI 伴学 · 翻译 · 解码 ${prefs.asrThreads}核'
-                : 'AI Tutor · Translation · ${prefs.asrThreads} threads',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => PreferencesScope(
-                  controller: controller,
-                  child: _AdvancedNetworkDetailPage(
-                    controller: controller,
-                    zh: zh,
+              (
+                icon: Icons.hub_outlined,
+                title: zh ? '网络与模型' : 'Network & Models',
+                summary: zh
+                    ? 'AI 伴学 · 翻译 · 解码 ${prefs.asrThreads}核'
+                    : 'AI Tutor · Translation · ${prefs.asrThreads} threads',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PreferencesScope(
+                      controller: controller,
+                      child: _AdvancedNetworkDetailPage(
+                        controller: controller,
+                        zh: zh,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
           const SizedBox(height: LLSpacing.xxl),
 
@@ -229,31 +227,31 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-/// 一级总览导航卡
-class _SettingsHubCard extends StatelessWidget {
-  const _SettingsHubCard({
-    required this.icon,
-    required this.title,
-    required this.summary,
-    required this.onTap,
-  });
+/// 一级总览的**功能目录**：所有功能收进同一张卡，组内用发丝线分隔。
+///
+/// 2026-10-20（GPT 镜像评审 §四 P3）：原来每个功能各自一张卡，于是首页
+/// 变成一列等重的"海报"，看着像一排互不相干的东西 —— 这就是老板说的
+/// "组件的形状设置得不太协调"。一张卡 + 发丝线 = 一份目录。
+class _SettingsHubGroup extends StatelessWidget {
+  const _SettingsHubGroup({required this.items});
 
-  final IconData icon;
-  final String title;
-  final String summary;
-  final VoidCallback onTap;
+  final List<({IconData icon, String title, String summary, VoidCallback onTap})>
+  items;
 
   @override
   Widget build(BuildContext context) {
     return LLCard(
       padding: EdgeInsets.zero,
       children: [
-        LLNavRow(
-          icon: icon,
-          title: title,
-          summary: summary,
-          onTap: onTap,
-        ),
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) const LLHairline(),
+          LLNavRow(
+            icon: items[i].icon,
+            title: items[i].title,
+            summary: items[i].summary,
+            onTap: items[i].onTap,
+          ),
+        ],
       ],
     );
   }

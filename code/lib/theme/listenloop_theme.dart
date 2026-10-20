@@ -38,6 +38,9 @@ class LLShape extends ThemeExtension<LLShape> {
     required this.shadowOn,
     required this.shadowAlpha,
     required this.texture,
+    required this.controlRadius,
+    required this.sheetRadius,
+    required this.pageInset,
   });
 
   /// Which style owns this shape language — the only reliable way for a widget
@@ -64,10 +67,22 @@ class LLShape extends ThemeExtension<LLShape> {
   final double shadowAlpha;
   final LLTexture texture;
 
+  /// 按钮、输入框、分段控件选中块的圆角（2026-10-20 GPT 镜像评审 §三.2）。
+  ///
+  /// 之前组件各自写死 13/10/7/8/10，令牌存在却**没有统治组件形态** ——
+  /// 这就是"看着不协调"的真正来源。现在统一到这一枚。
+  final double controlRadius;
+
+  /// 底部弹层的圆角（四套统一 16）。
+  final double sheetRadius;
+
+  /// 页面水平内边距（四套统一 20，替代散落的 16/20/24）。
+  final double pageInset;
+
   /// 白昼：纸面极淡投影，圆角中等。
   static const LLShape baseLight = LLShape(
     style: LLStyle.base,
-    card: 12,
+    card: 10,
     chip: 6,
     pill: 999,
     hairline: 1,
@@ -76,12 +91,15 @@ class LLShape extends ThemeExtension<LLShape> {
     shadowOn: true,
     shadowAlpha: 0.18,
     texture: LLTexture.none,
+    controlRadius: 10,
+    sheetRadius: 16,
+    pageInset: 20,
   );
 
   /// 黑夜：同一套形状，投影稍重以撑出层级。
   static const LLShape baseDark = LLShape(
     style: LLStyle.base,
-    card: 12,
+    card: 10,
     chip: 6,
     pill: 999,
     hairline: 1,
@@ -90,49 +108,64 @@ class LLShape extends ThemeExtension<LLShape> {
     shadowOn: true,
     shadowAlpha: 0.28,
     texture: LLTexture.none,
+    controlRadius: 10,
+    sheetRadius: 16,
+    pageInset: 20,
   );
 
   /// 学堂：纸面无投影，靠墨线分栏；卡片不浮，层次由留白撑（doc 21 队列 10）。
+  ///
+  /// 2026-10-20 评审：底纹归零 —— 传统气息由**纸色和书写性**表达，
+  /// 不靠满屏宣纸纹（那正是老板说的"背景是一条一条的线"）。
   static const LLShape paper = LLShape(
     style: LLStyle.academy,
-    card: 4,
-    chip: 4,
+    card: 8,
+    chip: 6,
     pill: 999,
     hairline: 0.8,
     rule: 1.4,
     gutter: 14,
     shadowOn: false,
     shadowAlpha: 0,
-    texture: LLTexture.ricePaper,
+    texture: LLTexture.none,
+    controlRadius: 8,
+    sheetRadius: 16,
+    pageInset: 20,
   );
 
   /// 书院：大圆角不成立，用直角 + 双线。阴影一并去掉——石头的层次靠线，
   /// 不靠投影（doc 21 队列 10「发线不阴影」）。
   static const LLShape stone = LLShape(
     style: LLStyle.oxbridge,
-    card: 6,
-    chip: 4,
+    card: 8,
+    chip: 6,
     pill: 6,
     hairline: 1,
     rule: 2,
     gutter: 13,
     shadowOn: false,
     shadowAlpha: 0,
-    texture: LLTexture.inkRules,
+    texture: LLTexture.none,
+    controlRadius: 8,
+    sheetRadius: 16,
+    pageInset: 20,
   );
 
   /// 都市：利落、几乎直角。
   static const LLShape steel = LLShape(
     style: LLStyle.metropolis,
-    card: 4,
-    chip: 2,
+    card: 6,
+    chip: 4,
     pill: 4,
     hairline: 1,
     rule: 1.6,
     gutter: 10,
     shadowOn: true,
     shadowAlpha: 0.32,
-    texture: LLTexture.glaze,
+    texture: LLTexture.none,
+    controlRadius: 6,
+    sheetRadius: 16,
+    pageInset: 20,
   );
 
   @override
@@ -147,6 +180,9 @@ class LLShape extends ThemeExtension<LLShape> {
     bool? shadowOn,
     double? shadowAlpha,
     LLTexture? texture,
+    double? controlRadius,
+    double? sheetRadius,
+    double? pageInset,
   }) => LLShape(
     style: style ?? this.style,
     card: card ?? this.card,
@@ -158,6 +194,9 @@ class LLShape extends ThemeExtension<LLShape> {
     shadowOn: shadowOn ?? this.shadowOn,
     shadowAlpha: shadowAlpha ?? this.shadowAlpha,
     texture: texture ?? this.texture,
+    controlRadius: controlRadius ?? this.controlRadius,
+    sheetRadius: sheetRadius ?? this.sheetRadius,
+    pageInset: pageInset ?? this.pageInset,
   );
 
   @override
@@ -174,8 +213,41 @@ class LLShape extends ThemeExtension<LLShape> {
       shadowOn: t < 0.5 ? shadowOn : other.shadowOn,
       shadowAlpha: _d(shadowAlpha, other.shadowAlpha, t),
       texture: t < 0.5 ? texture : other.texture,
+      controlRadius: _d(controlRadius, other.controlRadius, t),
+      sheetRadius: _d(sheetRadius, other.sheetRadius, t),
+      pageInset: _d(pageInset, other.pageInset, t),
     );
   }
+}
+
+/// 版式令牌（2026-10-20 GPT 镜像评审 §五）：**四套风格共享**。
+///
+/// 这一组定义"阅读和操作的基本尺寸"，不再让四套视觉风格决定孩子看到的
+/// 字有多大、需要点多小的按钮 —— 风格只该改气质，不该改几何。
+abstract final class LLLayout {
+  /// 页面水平内边距。
+  static const double pageInset = 20;
+
+  /// 大段落之间的间距。
+  static const double sectionGap = 24;
+
+  /// 分组（卡片内）之间的间距。
+  static const double groupGap = 12;
+
+  /// 文字与其说明之间的间距。
+  static const double textGap = 8;
+
+  /// 最小可点区域（无障碍下限）。
+  static const double minTouchTarget = 48;
+
+  /// 阅读区的最大内容宽度（再宽就该换行了）。
+  static const double readingMaxWidth = 440;
+
+  /// 阅读区正文字号基准（实际仍服从用户自己的阅读字号设置）。
+  static const double readingCharacterSize = 28;
+
+  /// 拼音与汉字的行距。
+  static const double readingLineGap = 14;
 }
 
 

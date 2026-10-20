@@ -157,11 +157,14 @@ class ChineseTextbookRubyLayout extends StatelessWidget {
           if (charStatuses != null) {
             switch (status ?? RubyCharStatus.unread) {
               case RubyCharStatus.correct:
-                cellCharColor = const Color(0xFF2E7D32); // 读对：翡翠绿
-                cellPinyinColor = const Color(0xFF2E7D32);
+                // 2026-10-20（评审 P1）：写死的红绿换成语义令牌 —— 四套风格
+                // 的色板里都有 success / danger，用它们才不会在别的风格里
+                // 冒出"外来色"。
+                cellCharColor = ll.success;
+                cellPinyinColor = ll.success;
               case RubyCharStatus.wrong:
-                cellCharColor = const Color(0xFFD32F2F); // 读错：朱砂红
-                cellPinyinColor = const Color(0xFFD32F2F);
+                cellCharColor = ll.danger;
+                cellPinyinColor = ll.danger;
               case RubyCharStatus.unread:
                 cellCharColor = unplayedColor ?? ll.textTertiary;
                 cellPinyinColor = pinyinUnplayedColor ?? ll.textTertiary;

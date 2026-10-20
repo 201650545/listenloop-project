@@ -72,22 +72,27 @@ class PlaybackControls extends StatelessWidget {
           ),
         ),
         SizedBox(
-          width: 88,
+          width: 80,
           child: FilledButton(
             key: const Key('play-pause-button'),
             onPressed: enabled ? onPlayPause : null,
             style: FilledButton.styleFrom(
-              minimumSize: const Size(72, 72),
-              maximumSize: const Size(72, 72),
+              // 2026-10-20（GPT 镜像评审 §四 P2）：72 → 64。圆形本身没问题
+              // （播放是功能语义），但这么大一颗在纸面上像一台独立机器。
+              minimumSize: const Size(64, 64),
+              maximumSize: const Size(64, 64),
               shape: const CircleBorder(),
               padding: EdgeInsets.zero,
-              backgroundColor: ll.textPrimary,
-              foregroundColor: ll.onPrimary,
+              // 颜色服从主题：原先写死 textPrimary/onPrimary，学堂风格下就是
+              // 一枚突然出现的现代黑色圆盘；accent/onAccent 才是"这一套
+              // 颜色里的主操作"。
+              backgroundColor: ll.accent,
+              foregroundColor: ll.onAccent,
             ),
             child: Icon(
               isPlaying ? Icons.pause : Icons.play_arrow,
               key: ValueKey(isPlaying),
-              size: 40,
+              size: 36,
             ),
           ),
         ),

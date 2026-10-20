@@ -7,8 +7,18 @@ import '../theme/listenloop_theme.dart';
 ///
 /// Vector only — no raster assets (doc 21 §三): textures are derived from the
 /// active ink color, so they follow both the style and the brightness, and they
-/// stay crisp at every text scale. Screens with `LLTexture.none` (白昼/黑夜)
-/// get the plain canvas they already had.
+/// stay crisp at every text scale.
+///
+/// 2026-10-20（GPT 镜像评审 §四 P0）：**四套风格的底纹全部归零**。
+///
+/// 原来的宣纸竖纹（每 7dp 一条）、稿纸横线（每 26dp 一条）、幕墙分格
+/// （每 56dp 一条）铺满整屏 —— 老板的原话是"背景图片是一条一条的线，
+/// 不好看"。评审的判断很准：**用背景纹理证明"风格存在"，会让背景和课文
+/// 争夺注意力**；那些横竖线本该属于课文行距与栏线，铺满屏就成了噪声。
+///
+/// 所以四套风格的 `LLShape.texture` 现在都是 [LLTexture.none]，[LLBackdrop]
+/// 直接返回 child，页面回到纯色画布。下面的 painter 保留着，等哪天要在
+/// **局部**（比如课文承载面）试极微弱的纸感时再用 —— 但绝不再回到全屏。
 class LLBackdrop extends StatelessWidget {
   const LLBackdrop({required this.child, super.key});
 

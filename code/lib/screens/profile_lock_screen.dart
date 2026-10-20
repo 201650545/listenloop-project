@@ -92,7 +92,9 @@ class _ProfileLockScreenState extends State<ProfileLockScreen> {
               _wrong ? '密码不对，再试一次' : '输入 4 位密码',
               style: TextStyle(
                 fontSize: 13,
-                color: _wrong ? ll.accent : ll.textTertiary,
+                // 报错用语义色（danger），不是强调色 —— 强调色是"主操作"的
+                // 颜色，拿来报"密码不对"会变成一条蓝字，读者不会当它是错误。
+                color: _wrong ? ll.danger : ll.textTertiary,
               ),
             ),
             const SizedBox(height: 22),

@@ -133,24 +133,28 @@ class LLChip extends StatelessWidget {
     required this.icon,
     super.key,
     this.size = 28,
-    this.radius = 8,
+    this.radius,
     this.iconSize = 20,
   });
 
   final IconData icon;
   final double size;
-  final double radius;
+
+  /// 圆角。null = 跟随风格的 `shape.chip`（2026-10-20 评审：组件不该各自
+  /// 写死圆角，令牌要真正统治形态）；确实需要特殊形状时再显式传。
+  final double? radius;
   final double iconSize;
 
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
+    final shape = context.llShape;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         color: ll.emphasis,
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(radius ?? shape.chip),
       ),
       child: Center(
         child: Icon(icon, size: iconSize, color: ll.textSecondary),
@@ -294,9 +298,11 @@ class LLNavRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
+    final shape = context.llShape;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
+      // 2026-10-20 评审：行控件的圆角收归令牌（原先写死 10）。
+      borderRadius: BorderRadius.circular(shape.controlRadius),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
@@ -364,12 +370,19 @@ class LLSegmented<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ll = context.ll;
+    final shape = context.llShape;
+    // 2026-10-20 评审：分段控件的圆角由 `shape.controlRadius` 推导，
+    // 不再各写各的 13/10/7；选中/未选中的文字色也不再写死色值 ——
+    // 写死的 #14161A / #FAFAF8 / #5C6169 会让学堂、书院的控件混进
+    // 基础风格的颜色（这正是"组件形状不协调"的一部分）。
+    final outerRadius = shape.controlRadius;
+    final innerRadius = (outerRadius - 3).clamp(2.0, 20.0);
     if (variant == LLSegmentVariant.expand) {
       return Container(
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: ll.controlTrack,
-          borderRadius: BorderRadius.circular(13),
+          borderRadius: BorderRadius.circular(outerRadius),
         ),
         child: Row(
           children: [
@@ -386,7 +399,7 @@ class LLSegmented<T> extends StatelessWidget {
                       color: value == selected
                           ? ll.controlThumb
                           : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(innerRadius),
                       border: Border.all(
                         color: value == selected
                             ? ll.controlThumbBorder
@@ -410,12 +423,8 @@ class LLSegmented<T> extends StatelessWidget {
                             ? FontWeight.w600
                             : FontWeight.w500,
                         color: value == selected
-                            ? (ll.brightness == Brightness.light
-                                ? const Color(0xFF14161A)
-                                : const Color(0xFFFAFAF8))
-                            : (ll.brightness == Brightness.light
-                                ? const Color(0xFF5C6169)
-                                : ll.textSecondary),
+                            ? ll.textPrimary
+                            : ll.textSecondary,
                       ),
                     ),
                   ),
@@ -430,7 +439,7 @@ class LLSegmented<T> extends StatelessWidget {
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: ll.controlTrack,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(outerRadius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -446,7 +455,7 @@ class LLSegmented<T> extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: value == selected ? ll.controlThumb : Colors.transparent,
-                    borderRadius: BorderRadius.circular(7),
+                    borderRadius: BorderRadius.circular(innerRadius),
                     boxShadow: value == selected
                         ? [
                             BoxShadow(
@@ -468,12 +477,8 @@ class LLSegmented<T> extends StatelessWidget {
                           ? FontWeight.w600
                           : FontWeight.w500,
                       color: value == selected
-                          ? (ll.brightness == Brightness.light
-                              ? const Color(0xFF14161A)
-                              : const Color(0xFFFAFAF8))
-                          : (ll.brightness == Brightness.light
-                              ? const Color(0xFF5C6169)
-                              : ll.textSecondary),
+                          ? ll.textPrimary
+                          : ll.textSecondary,
                     ),
                   ),
                 ),

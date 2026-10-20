@@ -676,19 +676,7 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
           icon: Icon(Icons.format_list_numbered, size: 20, color: ll.textSecondary),
           onPressed: () => _showSentenceSheet(context),
         ),
-        Center(
-          child: Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Text(
-              countLabel,
-              style: TextStyle(
-                fontSize: 12,
-                fontFamily: 'monospace',
-                color: ll.textTertiary,
-              ),
-            ),
-          ),
-        ),
+        // 句序移到下方的定位区（2026-10-20 评审 P1）—— 顶栏只留动作。
       ],
       body: currentSentence == null
           ? Center(
@@ -699,6 +687,15 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Column(
                   children: [
+                    // 定位区：上一句 / 句序 / 下一句
+                    //
+                    // 2026-10-20（GPT 镜像评审 §四 P1）：四个按钮等权并排，
+                    // 是"读页丑"的根因之一 —— 四种重要度完全不同的动作挤在
+                    // 同一行。评审的判断：**导航归定位区，主操作独占底部**。
+                    // 于是「上一句/下一句」提到课文上方成为定位区，
+                    // 底部只剩「听示范 / 开始跟读」两个真正的主操作。
+                    _buildPositionRow(context, ll, controller, countLabel),
+                    const SizedBox(height: 4),
                     Expanded(
                       // 2026-10-20 修：LayoutBuilder 不支持 intrinsic 尺寸查询，
                       // 它被 IntrinsicHeight 包着时会抛
@@ -735,10 +732,13 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
                                           style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w500,
+                                            // 2026-10-20（评审 P1）：固定红绿
+                                            // 换成语义令牌，否则明暗两套色板
+                                            // 之外的风格全是"外来色"。
                                             color: _statusHint.contains('对啦') || _statusHint.contains('准确')
-                                                ? const Color(0xFF2E7D32)
+                                                ? ll.success
                                                 : (_statusHint.contains('错词') || _statusHint.contains('标准')
-                                                    ? const Color(0xFFD32F2F)
+                                                    ? ll.danger
                                                     : ll.textSecondary),
                                             letterSpacing: 0.5,
                                           ),
@@ -746,7 +746,12 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
                                       ),
                                     ),
 
-                                    const Spacer(flex: 1),
+                                    // 课文往上提：郭老师说人的视线天然落在画面
+                                    // **中上部分**，下面 1/4 基本是忽略区。
+                                    // 原来上下两个 Spacer 把它推到屏幕中线以下；
+                                    // 现在改成固定上间距 —— 课文紧跟状态提示，
+                                    // 停在视口的上三分之一。
+                                    const SizedBox(height: 36),
 
                                     // 核心大字课文排版（红绿字词判定上色）
                                     Row(
@@ -799,7 +804,7 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
                                       _buildWrongWordDrillCard(context, ll),
                                     ],
 
-                                    const Spacer(flex: 2),
+                                    const Spacer(flex: 1),
                                   ],
                                 ),
                               ),
@@ -808,51 +813,40 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
                         },
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
 
-                    // 底部四个核心按钮：[ 上一句 ] [ 示范 ] [ 跟读 ] [ 下一句 ]
+                    // 底部主操作区：只有两个真正的主操作。
+                    //
+                    // 2026-10-20（GPT 镜像评审 §四 P1）：「听示范 / 开始跟读」
+                    // 是这一页的两件事；上一句/下一句是导航，提到上方定位区了。
                     Row(
                       children: [
                         _buildBorderButton(
-                          label: '上一句',
-                          onTap: controller.canGoPrevious ? _onPrevious : null,
-                          ll: ll,
-                          flex: 2,
-                        ),
-                        const SizedBox(width: 8),
-
-                        _buildBorderButton(
-                          label: controller.isPlaying ? '暂停' : '示范',
+                          label: controller.isPlaying ? '暂停' : '听示范',
                           onTap: controller.isPlaying
                               ? controller.pause
                               : _onPlayDemonstration,
                           ll: ll,
-                          flex: 3,
+                          flex: 1,
                           isHighlight: false,
-                          icon: controller.isPlaying ? Icons.pause : Icons.volume_up_outlined,
+                          icon: controller.isPlaying
+                              ? Icons.pause
+                              : Icons.volume_up_outlined,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 10),
 
                         _buildBorderButton(
                           label: _isRecording
                               ? '完成'
-                              : (_isScoring ? '评测中' : (_drillingWord != null ? '词语跟读' : '跟读')),
+                              : (_isScoring ? '评测中' : (_drillingWord != null ? '词语跟读' : '开始跟读')),
                           onTap: _isScoring
                               ? null
                               : (_drillingWord != null ? _onStartDrillRecording : _onStartRecording),
                           ll: ll,
-                          flex: 3,
+                          flex: 1,
                           isHighlight: true,
                           isPulse: _isRecording,
                           icon: _isRecording ? Icons.stop : Icons.mic_none_outlined,
-                        ),
-                        const SizedBox(width: 8),
-
-                        _buildBorderButton(
-                          label: '下一句',
-                          onTap: controller.canGoNext ? _onNext : null,
-                          ll: ll,
-                          flex: 2,
                         ),
                       ],
                     ),
@@ -864,6 +858,80 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
     );
   }
 
+  /// 定位区：上一句 / 句序 / 下一句（2026-10-20 评审 P1）。
+  ///
+  /// 三个元素等宽平铺，句序居中；导航用轻量的圆形按钮，**不与主操作
+  /// 争视觉重量**。
+  Widget _buildPositionRow(
+    BuildContext context,
+    LLPalette ll,
+    SentencePlayerController controller,
+    String countLabel,
+  ) {
+    return Row(
+      children: [
+        _buildNavButton(
+          icon: Icons.chevron_left_rounded,
+          tooltip: '上一句',
+          enabled: controller.canGoPrevious,
+          onTap: _onPrevious,
+          ll: ll,
+        ),
+        Expanded(
+          child: Center(
+            child: Text(
+              '第 $countLabel 句',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontFamily: 'monospace',
+                color: ll.textTertiary,
+              ),
+            ),
+          ),
+        ),
+        _buildNavButton(
+          icon: Icons.chevron_right_rounded,
+          tooltip: '下一句',
+          enabled: controller.canGoNext,
+          onTap: _onNext,
+          ll: ll,
+        ),
+      ],
+    );
+  }
+
+  /// 定位区的小导航钮：圆形、描边、无填充 —— 一眼就知道是"翻页"，
+  /// 不会误认成主操作。
+  Widget _buildNavButton({
+    required IconData icon,
+    required String tooltip,
+    required bool enabled,
+    required VoidCallback onTap,
+    required LLPalette ll,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: ll.divider, width: 1),
+          ),
+          child: Icon(
+            icon,
+            size: 20,
+            color: enabled ? ll.textSecondary : ll.disabled,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 错词单独训练专练卡片
   Widget _buildWrongWordDrillCard(BuildContext context, LLPalette ll) {
     final cur = _drillingWord!;
@@ -871,7 +939,12 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: ll.surface,
-        border: Border.all(color: const Color(0xFFD32F2F), width: 1.2),
+        // 2026-10-20（评审 P1）：**不要整块鲜红边框**。孩子读错字时不该
+        // 站在一片警告色里 —— 语义色只标在"错的那个字"上，操作区保持普通
+        // 纸色。改为左侧一条语义色线。
+        border: Border(
+          left: BorderSide(color: ll.danger, width: 2),
+        ),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -943,19 +1016,17 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
     IconData? icon,
   }) {
     final enabled = onTap != null;
-    final isDark = ll.brightness == Brightness.dark;
 
-    final bgColor = isHighlight
-        ? (isDark ? Colors.white : const Color(0xFF14161A))
-        : ll.surface;
+    // 2026-10-20（评审 P1）：主操作的颜色**服从主题**。原先写死
+    // #14161A（近黑）—— 那是"基础风格"的颜色，学堂/书院/都市三套里
+    // 这枚按钮都是一枚突然出现的现代黑色方块。改用 accent / onAccent。
+    final bgColor = isHighlight ? ll.accent : ll.surface;
 
     final textColor = isHighlight
-        ? (isDark ? const Color(0xFF14161A) : Colors.white)
+        ? ll.onAccent
         : (enabled ? ll.textPrimary : ll.disabled);
 
-    final borderColor = isHighlight
-        ? (isDark ? Colors.white : const Color(0xFF14161A))
-        : ll.divider;
+    final borderColor = isHighlight ? ll.accent : ll.divider;
 
     return Expanded(
       flex: flex,
@@ -969,7 +1040,7 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
             color: bgColor,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isPulse ? const Color(0xFFD32F2F) : borderColor,
+              color: isPulse ? ll.danger : borderColor,
               width: isPulse ? 2 : 1,
             ),
           ),

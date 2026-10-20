@@ -156,12 +156,7 @@ class _SentencePageListState extends State<SentencePageList>
           ? widget.itemKeys[index].currentContext
           : null;
       if (mountedCtx != null) {
-        Scrollable.ensureVisible(
-          mountedCtx,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          alignment: _targetAlignment(mountedCtx),
-        );
+        _scrollRowToScreenMiddle(mountedCtx, animate: true);
         return;
       }
 
@@ -182,17 +177,50 @@ class _SentencePageListState extends State<SentencePageList>
             ? widget.itemKeys[index].currentContext
             : null;
         if (ctx != null) {
-          Scrollable.ensureVisible(
-            ctx,
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            alignment: _targetAlignment(ctx),
-          );
+          _scrollRowToScreenMiddle(ctx, animate: true);
         } else if (attempt < 4) {
           _alignToIndex(index, attempt: attempt + 1);
         }
       });
     });
+  }
+
+  /// 把这一行滚到**手机屏幕中线**上（卡片底边 = 屏幕中线）。
+  ///
+  /// 2026-10-20 郭老师：「初读时定位字幕的形状有点偏上，应该再下来一点，
+  /// 形状的底与**画面中线**重合」——"中线"指**手机屏幕**的中线。
+  ///
+  /// 做法：拿**屏幕绝对坐标**算差值，而不是"视口比例"。
+  /// ① 视口比例要先知道视口顶边在屏幕的哪儿，还要 clamp，误差会攒到
+  ///    几十像素（实测偏了 52px）；
+  /// ② 绝对坐标法只依赖两件事——卡片当前在屏幕的哪儿、屏幕多高 ——
+  ///    差多少滚多少，**像素级准**。
+  void _scrollRowToScreenMiddle(BuildContext rowContext, {required bool animate}) {
+    final box = rowContext.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return;
+    if (!_scrollController.hasClients) return;
+    final view = View.of(rowContext);
+    // 屏幕（窗口）高度，逻辑像素。不用 MediaQuery.sizeOf —— 它可能已被
+    // SafeArea 之类的上层裁过，拿不到"整块屏幕"的中线。
+    final screenHeight = view.physicalSize.height / view.devicePixelRatio;
+    final rowTop = box.localToGlobal(Offset.zero).dy;
+    final targetTop = screenHeight / 2 - box.size.height;
+    final delta = targetTop - rowTop;
+    if (delta.abs() < 0.5) return;
+    final position = _scrollController.position;
+    final target = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (animate) {
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _scrollController.jumpTo(target);
+    }
   }
 
   /// 当前句卡片应该落在什么位置。
@@ -201,27 +229,16 @@ class _SentencePageListState extends State<SentencePageList>
   /// 形状的底与**画面中线**重合」——这里的"中线"指**手机屏幕**的中线
   /// （不是字幕区自己的中线）。所以拿**屏幕高度**算：卡片底边 = 屏幕高的一半。
   ///
-  /// 返回值是 [Scrollable.ensureVisible] 的 alignment：卡片**上沿**在视口
-  /// 里的落点比例（0 = 顶边贴视口顶，1 = 底边贴视口底）。
-  double _targetAlignment(BuildContext rowContext) {
-    final rowBox = rowContext.findRenderObject();
-    final rowHeight =
-        rowBox is RenderBox && rowBox.attached && rowBox.hasSize
-            ? rowBox.size.height
-            : _estimatedRowHeight;
-    final viewport = _scrollController.hasClients
-        ? _scrollController.position.viewportDimension
-        : 1.0;
-    if (viewport <= 0) return 0.32;
-    return (_desiredRowTopInViewport(rowHeight) / viewport).clamp(0.0, 1.0);
-  }
-
   /// 卡片上沿在视口里的目标位置（视口坐标，px）。
   ///
   /// 卡片底边要落在**手机屏幕**的中线 → 上沿 = 屏幕中线 − 卡片高；
   /// 再减去视口顶边在屏幕坐标里的位置，换算成视口内坐标。
+  ///
+  /// 屏幕高度取 [View] 的物理尺寸（整块屏，不受 SafeArea 裁剪影响），
+  /// 与 [_scrollRowToScreenMiddle] 用的是同一把尺。
   double _desiredRowTopInViewport(double rowHeight) {
-    final screenHeight = MediaQuery.sizeOf(context).height;
+    final view = View.of(context);
+    final screenHeight = view.physicalSize.height / view.devicePixelRatio;
     // 视口顶边在屏幕坐标里的位置：列表自身的渲染盒（= 可视区域）。
     double viewportTop = 0.0;
     final viewportBox = context.findRenderObject();
@@ -468,14 +485,19 @@ class _SentenceRow extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.only(left: 10),
+      // 2026-10-20（GPT 镜像评审 §四 P2）：**句子不是卡片流，是课文段落**。
+      // 未选中的句子不画底、不画框、不画圆角，只靠留白分开；只有当前句
+      // 拿到极浅的底和一条 2dp 强调线。原来每句都是圆角卡片（连未选中的
+      // 都铺一层 0.02 的底），整页看着像一串聊天记录，不像在翻课文。
+      margin: EdgeInsets.symmetric(vertical: isCurrent ? 2 : 6),
+      padding: EdgeInsets.only(left: isCurrent ? 10 : 0),
       decoration: BoxDecoration(
-        // 2026-10-20 郭老师：句子统一成「卡片流」——每一句都是同形态的卡片，
-        // 层级只靠「左边框 + 字重/字色」区分；原先未选中完全透明底、
-        // 选中底又几乎看不见，视觉上像一半有底一半没底。
-        color: ll.textPrimary.withValues(alpha: isCurrent ? 0.06 : 0.02),
-        borderRadius: BorderRadius.circular(LLRadius.small),
+        color: isCurrent
+            ? ll.textPrimary.withValues(alpha: 0.05)
+            : Colors.transparent,
+        borderRadius: isCurrent
+            ? BorderRadius.circular(LLRadius.small)
+            : BorderRadius.zero,
         border: Border(
           left: isCurrent
               // 选中框粗细吃 `shape.rule`——这是该令牌的设计用途
@@ -492,7 +514,7 @@ class _SentenceRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(LLRadius.small),
         onTap: () => onSentenceTap(index),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

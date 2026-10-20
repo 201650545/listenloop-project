@@ -80,27 +80,24 @@ class LLAudioControlBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ll = context.ll;
     final shape = context.llShape;
+    // 2026-10-20（GPT 镜像评审 §四 P2）：这条底座**不再是漂浮的卡片**，
+    // 而是「书页下方自然延伸的操作区」——
+    // ① 底色直接用 `ll.surface`（原先浅色下用 lerp(surface, bg, 0.5) 调出
+    //    一块独立的中间色面，这块色面正是"播放组件栏与背景十分突兀"的
+    //    直接原因）；
+    // ② 只保留一条顶部发丝线做分界（不画四周边框）；
+    // ③ 不再无条件画阴影 —— 学堂/书院本来就设了 shadowOn=false，底座却
+    //    照样浮起来。
     return Container(
       decoration: BoxDecoration(
-        color: ll.brightness == Brightness.light
-            ? Color.lerp(ll.surface, ll.bg, 0.5)!
-            : ll.surface,
-        borderRadius: BorderRadius.circular(shape.card),
-        border: Border.all(
-          color: ll.divider.withValues(alpha: 0.7),
-          width: shape.hairline,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(
-              alpha: ll.brightness == Brightness.light ? 0.03 : 0.18,
-            ),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+        color: ll.surface,
+        border: Border(
+          top: BorderSide(
+            color: ll.divider.withValues(alpha: 0.7),
+            width: shape.hairline,
           ),
-        ],
+        ),
       ),
-      clipBehavior: Clip.antiAlias,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

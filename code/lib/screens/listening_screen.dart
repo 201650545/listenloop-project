@@ -2207,7 +2207,10 @@ class ListeningScreenState extends State<ListeningScreen>
                 // 透传既有 controller 方法与 Sheet，播放/断句逻辑零改动；
                 // 顶部细线为当前句进度（控制器无公开 seek，故仅展示）。
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  // 2026-10-20（GPT 镜像评审 §四 P2）：底座**铺满整宽**，
+                  // 外面不再用左右留边把它塑造成一张独立卡片 —— 它应该是
+                  // 书页下方自然延伸的操作区，而不是悬在纸面中间的一台机器。
+                  padding: const EdgeInsets.only(top: 4),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
