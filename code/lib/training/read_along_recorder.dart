@@ -493,7 +493,7 @@ class ReadAlongRecorder {
     this.silenceWindowMs = 1000,
     this.rmsThreshold = 0.008,
     this.inputSampleRate = 48000,
-    this.inputGain = 1.0,
+    this.inputGain = 5.0,
     Future<Directory> Function()? tempDir,
     this.onPcm,
   })  : _mic = mic ?? RecordMic(),
@@ -510,8 +510,10 @@ class ReadAlongRecorder {
   /// 我们把 AGC 关掉（见 [RecordMic]），改用**固定增益 + 软限幅**：
   /// 固定增益不会在句中跳变 ⇒ ASR 前端更稳；软限幅只处理近讲的峰值。
   ///
-  /// ⚠️ 默认 **1.0（不动）**：增益不提高信噪比，放大了也会放大环境噪声。
-  ///   先用 [ReadAlongRecorder] 的诊断日志量出真实电平，再决定要不要调。
+  /// ⚠️ 默认值**有实测依据**（2026-10-21 小米14 真机，PC 扬声器放课包音频、
+  ///   手机麦克风收）：安静 rms=0.0008（−95dBFS）；**说话 rms=0.0036（−66dBFS）、
+  ///   peak=0.137**。⇒ 5×（≈+14dB）后说话电平约 −52dBFS、峰值 0.69 < 软限幅
+  ///   拐点 0.92 ⇒ 正常说话不削顶，近讲峰值才被软限幅接管。
   final double inputGain;
 
   /// **PCM 旁路**（2026-10-21 流式识别）：每收到一块 16kHz 单声道 PCM 就

@@ -615,7 +615,15 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
       if (_useStreaming) {
         _liveController = live;
         // 流式路径：PCM 块直接推给流式引擎（不再每 800ms 重转写 7 秒）。
-        _recorder.onPcm = (pcm) => _liveController?.pushPcm(pcm);
+        //
+        // ⚠️ 回授防护（2026-10-21）：**App 自己的课文在播时**，麦克风会录进
+        //   手机扬声器的声音 ⇒ 那不是孩子在读（会让孩子"白拿满分"）。
+        //   ⇒ 半双工：播放期间不把 PCM 推给识别引擎。
+        //   （跟读时 App 会自动暂停课文，见 [_startListening]。）
+        _recorder.onPcm = (pcm) {
+          if (widget.controller.isPlaying) return;
+          _liveController?.pushPcm(pcm);
+        };
       } else {
         live.dispose();
       }
