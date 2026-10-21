@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/sentence.dart';
 import '../utils/chinese_pinyin.dart';
+import '../utils/chinese_polyphone_map.dart';
 import 'chinese_word_segmenter.dart';
 import 'read_along_session.dart';
 import 'reading_alignment.dart';
@@ -388,6 +389,36 @@ class ContinuousReadingSession extends ChangeNotifier {
     ];
     _carry = const [];
 
+    // ── 识别侧**同位异读回填**（2026-10-21）────────────────────────
+    //
+    // ASR 可能把课文里的字吐成**另一个读音相容的字**（例：课文「长出」的
+    // 「长」=zhǎng，ASR 吐「常」=cháng）⇒ 音节级比较会判成读错 ⇒ 红字 ⇒
+    // 游标不推进 ⇒ **整句卡死**（孩子读对了也说读错）。
+    //
+    // ⇒ 若识别位与**同位置**的期望字读音相容（同音，或落在该字的异读集合里）
+    //   ⇒ 把识别字/音节**回填成期望字/期望音节** ⇒ 后面按字符严格判 ⇒ 判绿。
+    //
+    // ⚠️ 为什么不在对齐器里「放宽读音集合」？
+    //   放宽 ⇒ DP 允许**任意错位**的同读音配对 ⇒ 孩子**没读**的字也判绿
+    //   （用户反馈：「只要这个字第一次发音发对了，后面他不用读都是对的」）。
+    //   ⇒ 回填是**同位**的、**先于**对齐的 ⇒ 既治多音字，又不制造假阳性。
+    //   ⇒ 漏读导致整体错位时，同位置的字读音通常不相容 ⇒ 不会误回填 ⇒
+    //   「漏读了开头」照样会被暴露成红字。
+    for (var k = 0; k < heard.length && k < expected.length; k++) {
+      if (heardChars[k].isEmpty || expectedChars[k].isEmpty) continue;
+      if (heardChars[k] == expectedChars[k]) continue;
+      if (!_readingsCompatible(
+        expected[k],
+        expectedChars[k],
+        heard[k],
+        heardChars[k],
+      )) {
+        continue;
+      }
+      heard[k] = expected[k];
+      heardChars[k] = expectedChars[k];
+    }
+
     final result = _aligner.align(
       expected: expected,
       recognized: heard,
@@ -503,6 +534,21 @@ class ContinuousReadingSession extends ChangeNotifier {
 
   /// 某一刻的"我在读第几个字"（供页面高亮用）。
   int get visibleCursor => _committedCursor;
+
+  /// 两个字的读音是否**相容**（同音，或一个是另一个的异读）。
+  ///
+  /// 数据源：`chinese_polyphone_map.dart`（只收去调后读音确实不同的多音字）。
+  static bool _readingsCompatible(
+    String expectedSyllable,
+    String expectedChar,
+    String heardSyllable,
+    String heardChar,
+  ) {
+    if (expectedSyllable == heardSyllable) return true; // 同音字
+    final alt = kPolyphoneReadings[expectedChar];
+    if (alt != null && alt.contains(heardSyllable)) return true; // 期望字的另一个读音
+    return false;
+  }
 
   @override
   void dispose() {
