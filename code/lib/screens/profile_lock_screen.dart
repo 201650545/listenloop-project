@@ -126,15 +126,61 @@ class _ProfileLockScreenState extends State<ProfileLockScreen> {
             const Spacer(),
             Padding(
               padding: const EdgeInsets.only(bottom: 20),
-              child: Text(
-                '密码只存在这台设备上',
-                style: TextStyle(fontSize: 11, color: ll.textTertiary),
+              child: Column(
+                children: [
+                  Text(
+                    '密码只存在这台设备上',
+                    style: TextStyle(fontSize: 11, color: ll.textTertiary),
+                  ),
+                  const SizedBox(height: 10),
+                  // 2026-10-20 郭老师：「先把密码机制给去掉…你没有设置可以
+                  // 无密码的机制吗」—— 密码**本来就是可选的**（档案 → ⋯ →
+                  // 取消密码），但真忘了密码就出不来了。这里补上出口：
+                  // **长按 3 秒**清除本机密码（要按满 3 秒，孩子按不出来），
+                  // 清除前再确认一次。
+                  GestureDetector(
+                    onLongPress: _confirmResetPin,
+                    child: Text(
+                      '忘记密码？长按这里清除本机密码',
+                      style: TextStyle(fontSize: 11.5, color: ll.textTertiary),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// 长按「忘记密码」→ 二次确认 → 清除本机档案密码。
+  Future<void> _confirmResetPin() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('清除本机密码？'),
+        content: const Text(
+          '清除后，打开 App 不用再输密码（档案和学习记录都保留）。\n'
+          '这是最后一道出口：清了就没法再锁回去了。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('清除密码'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final profile = widget.store.active;
+    await widget.store.setPin(profile.id, null);
+    if (!mounted) return;
+    widget.onUnlocked();
   }
 }
 

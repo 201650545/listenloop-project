@@ -114,6 +114,9 @@ class RootShellState extends State<RootShell> {
   // 底部导航栏四分位：0: 课程, 1: 听, 2: 跟读, 3: 设置
   int _bottomIndex = 0;
 
+  /// 2026-10-20 全屏播放：沉浸模式（听页把组件全收了，导航栏也跟着收）。
+  bool _immersive = false;
+
   int get _stackIndex => _bottomIndex;
 
   /// Directly opens a lesson in the Listen tab and starts playback.
@@ -393,6 +396,10 @@ class RootShellState extends State<RootShell> {
             onRequestReadAlongTab: () {
               setState(() => _bottomIndex = 2);
             },
+            // 2026-10-20 全屏播放：沉浸时底部导航跟着收。
+            onImmersiveChanged: (immersive) {
+              if (mounted) setState(() => _immersive = immersive);
+            },
           ),
           _ReadAlongTab(
             key: _readAlongTabKey,
@@ -404,7 +411,7 @@ class RootShellState extends State<RootShell> {
           SettingsScreen(repository: widget.repository),
         ],
       ),
-      bottomBar: _buildBottomNav(context, ll, s),
+      bottomBar: _immersive ? null : _buildBottomNav(context, ll, s),
     );
   }
 
@@ -468,11 +475,15 @@ class _ListenTab extends StatefulWidget {
     required this.audioFacade,
     required this.vocabularyStore,
     this.onRequestReadAlongTab,
+    this.onImmersiveChanged,
   });
 
   final ActiveLessonSession? session;
   final LessonRepository repository;
   final VoidCallback? onRequestReadAlongTab;
+
+  /// 2026-10-20 全屏播放：听页进入/退出沉浸时通知宿主（导航栏跟着收）。
+  final ValueChanged<bool>? onImmersiveChanged;
 
   final Widget Function(
     BuildContext context,
@@ -604,6 +615,11 @@ class _ListenTabState extends State<_ListenTab> {
       onControllerCreated: (controller) => _boundController = controller,
       audioFacade: widget.audioFacade,
       onRequestReadAlongTab: widget.onRequestReadAlongTab,
+      // 2026-10-20 全屏播放：沉浸时**底部导航也收起** —— 全屏就全屏，
+      // 留一条 tab 栏在下面就不叫全屏了。
+      onImmersiveChanged: (immersive) {
+        widget.onImmersiveChanged?.call(immersive);
+      },
     );
     // Test seam: observe navigation without the audio stack.
     final builder = widget.listeningScreenBuilder;
@@ -637,6 +653,31 @@ class _ReadAlongTab extends StatefulWidget {
 class _ReadAlongTabState extends State<_ReadAlongTab> {
   SentencePlayerController? _ownedController;
   String? _ownedLessonId;
+
+  /// 读页用的熟读切分（长意群）—— 2026-10-21 读页也要能切初读/熟读。
+  List<Sentence>? _readAlternateSentences;
+  String? _readAlternateLessonId;
+
+  @override
+  void didUpdateWidget(_ReadAlongTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _maybeLoadAlternate(oldWidget.session?.item.lesson.id);
+  }
+
+  void _maybeLoadAlternate(String? lessonId) {
+    if (lessonId == null) return;
+    if (_readAlternateLessonId == lessonId) return;
+    _readAlternateLessonId = lessonId;
+    widget.repository.getAlternateSentences(lessonId).then((alt) {
+      if (!mounted) return;
+      if (alt == null || alt.isEmpty) return;
+      setState(() {
+        _readAlternateSentences = alt;
+      });
+    }).catchError((_) {
+      // 取不到就只给初读档（不阻断）。
+    });
+  }
 
   void onLeave() {
     final c = widget.controller ?? _ownedController;
@@ -672,12 +713,15 @@ class _ReadAlongTabState extends State<_ReadAlongTab> {
     final item = session.item;
     final lesson = item.lesson;
     final controller = widget.controller ?? _getOrCreateController(session);
+    _maybeLoadAlternate(lesson.id);
 
     return ChineseReadingScreen(
       key: ValueKey('read-along-${lesson.id}'),
       lesson: lesson,
       sentences: session.sentences,
       controller: controller,
+      // 2026-10-21：读页也要能切「初读 / 熟读」⇒ 把熟读切分传下去。
+      alternateSentences: _readAlternateSentences,
       onSelectSentence: (index) {
         controller.selectSentence(index);
       },

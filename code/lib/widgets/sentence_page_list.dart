@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -7,12 +9,14 @@ import '../preferences/app_preferences.dart';
 import '../theme/listenloop_theme.dart';
 import 'chinese_textbook_ruby_layout.dart';
 
-/// 单页文本 / Transcript mode (virtualized ListView.builder for 1000+ items):
-/// * current sentence: English near-white + Chinese secondary, with a 2px
-///   bar on the left edge (never a filled box);
-/// * other sentences: English secondary, Chinese tertiary.
-/// * interlude badges: displayed between sentences when gap >= 10s.
-/// * virtualized scrolling: only builds visible items; auto-centers with user scroll detection.
+/// 听页字幕列表。
+///
+/// 定位规则：当前句所在行的顶部对齐到屏幕高度的 28%。
+///
+/// 正常切句使用单一 ScrollController 动画。
+/// 只有明确要求立即重新定位时，才使用 jumpTo。
+///
+/// 所有行都保持可变高度；不使用 itemExtent 或 prototypeItem。
 class SentencePageList extends StatefulWidget {
   const SentencePageList({
     super.key,
@@ -29,6 +33,7 @@ class SentencePageList extends StatefulWidget {
     this.revealToken = 0,
     this.onVisibleIndexChanged,
   });
+
   final List<Sentence> sentences;
   final int currentIndex;
   final Duration? currentPosition;
@@ -37,471 +42,645 @@ class SentencePageList extends StatefulWidget {
   final bool isChineseMode;
   final ValueChanged<int> onSentenceTap;
 
-  /// Optional item keys for backwards compatibility.
+  /// 可选的外部行 key，保留既有 API。
+  /// 未提供的行使用组件内部创建的 GlobalKey。
   final List<GlobalKey> itemKeys;
 
   final AppPreferences preferences;
-
-  /// Lesson title + meta block shown once at the top of the transcript.
   final Widget? header;
 
-  /// Bumped by the parent to request an immediate re-align to
-  /// [currentIndex] (tab re-entry, presentation-mode switch).
+  /// 改变此值会要求立即重新对齐当前句。
   final int revealToken;
 
-  /// Notifies the parent of the currently visible sentence index at the focus line (~32% viewport).
+  /// 当前焦点线附近的可见句子索引。
   final ValueChanged<int>? onVisibleIndexChanged;
 
   @override
   State<SentencePageList> createState() => _SentencePageListState();
 }
 
-class _SentencePageListState extends State<SentencePageList>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _transition = AnimationController(
-    vsync: this,
-    duration: LLMotion.normal,
-  );
-
+class _SentencePageListState extends State<SentencePageList> {
   late final ScrollController _scrollController = ScrollController();
 
-  /// The row that is fading OUT during a sentence switch (null = idle).
-  int? _fromIndex;
+  final GlobalKey _viewportKey =
+      GlobalKey(debugLabel: 'SentencePageList.viewport');
 
-  /// +1 = next (outgoing drifts left), -1 = previous (mirrored).
-  int _direction = 1;
+  final GlobalKey _headerKey =
+      GlobalKey(debugLabel: 'SentencePageList.header');
+
+  /// 内部 key 只用于测量实际挂载的行。
+  /// 外部 itemKeys 优先使用，避免改变调用方的 key 语义。
+  final List<GlobalKey> _ownedItemKeys = <GlobalKey>[];
+
+  /// 只保存当前已挂载的行索引，避免每帧遍历整篇课文。
+  final Set<int> _mountedRowIndices = <int>{};
 
   bool _userScrolling = false;
   Timer? _resumeTimer;
 
-  /// Rough average height of a bilingual transcript row (JP+ZH+counter).
-  /// Only used for the initial jump estimate; the actual target offset is
-  /// refined from real rendered-row offsets (see _alignToIndex).
-  static const double _estimatedRowHeight = 175.0;
+  /// 每次新定位请求都会递增。
+  /// 旧请求的 post-frame 回调和动画完成回调必须通过此检查。
+  int _alignmentGeneration = 0;
 
-  @override
-  void didUpdateWidget(SentencePageList oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final oldIndex = oldWidget.currentIndex;
-    final newIndex = widget.currentIndex;
-    if (oldIndex != newIndex) {
-      _fromIndex = oldIndex;
-      _direction = newIndex > oldIndex ? 1 : -1;
-      _transition
-        ..stop()
-        ..reset()
-        ..forward();
+  /// 布局稳定性复核：每个定位请求最多安排一次。
+  Timer? _alignmentCheckTimer;
 
-      // 切句发生时，无论之前是否划动过，立即解除阻断让动画跟上新句子
-      _userScrolling = false;
-      _resumeTimer?.cancel();
-      // 2026-10-20 郭老师：「像音乐播放器播放音乐展示歌词一样，显示当前所听
-      // 句子的形状，应该**固定**在人看手机的视觉中心区」。
-      //
-      // 所以每句都要重新锚一次 —— 锚的是**形状的底边**（压在屏幕中线上）：
-      // 音频往前走 → 列表往下滚 → 字幕整列向上流过去，而那个"当前句形状"
-      // 原地不动地钉在中心区。这就是歌词模式。
-      //
-      // （我一度改成"形状自己往下走、列表最小滚动"，那是反的：形状会跑偏。）
-      _autoScrollToIndex(newIndex);
-    } else if (!identical(widget.sentences, oldWidget.sentences)) {
-      _fromIndex = null;
-      _transition.reset();
-      // 2026-10-20 郭老师：「字幕当前播放句子的形状标注位置错了」——
-      // 课文数据是**异步**到的：列表先渲染旧句（甚至空），数据到位后句子
-      // 列表整体换掉，但 currentIndex 没变 ⇒ 上面那个"索引变了"的分支不会
-      // 触发 ⇒ 形状从来没被摆正过，列表停在 PageStorage 恢复出来的旧位置
-      // （于是当前句 15 在屏外，只看得见 7~12）。
-      // 数据换新 = 必须重新摆一次形状。
-      _userScrolling = false;
-      _autoScrollToIndex(widget.currentIndex);
-    }
-    if (widget.revealToken != oldWidget.revealToken) {
-      _userScrolling = false;
-      _autoScrollToIndex(widget.currentIndex);
-    }
-  }
+  int? _lastReportedVisibleIndex;
 
-  /// Align the transcript so [index] sits ~1/3 from the top.
+  /// 当前句落在**列表视口内**的这个高度比例上（上三分之一 = 视觉中心区）。
   ///
-  /// 2026-09-22 rework (user report: 定位慢/卡顿/模式切换后定位失效):
-  /// the old two-phase estimate-then-ensureVisible failed on large jumps —
-  /// the 175px estimate drifts by tens of thousands of px over 1000+
-  /// rows, so `animateTo` landed nowhere near the target and the target
-  /// row was never mounted, making ensureVisible silently no-op.
-  ///
-  /// Now: jumpTo the estimate immediately (no long animation), then use
-  /// the real rendered offset of any mounted row to correct the estimate
-  /// and re-jump — converges within 2-3 frames even across a 1200-row
-  /// jump — then fine-align with ensureVisible once the row is mounted.
-  void _autoScrollToIndex(int index) {
-    _alignToIndex(index, attempt: 0);
-  }
+  /// ⚠️ 口径必须是**视口相对**，不是屏幕相对（2026-10-21 真机前发现）：
+  /// 听页上方还有封面/媒体区，列表视口顶在屏幕 28% 之下 ⇒ 按屏幕 28% 算的
+  /// 焦点线落在视口**之外** ⇒ 目标不可达 ⇒ 列表不滚 ⇒ 当前句滚出屏幕。
+  /// 读页 `LessonReadingDocument._focusAlignment` 同为 0.28，且是**视口相对**
+  /// ⇒ 两页共用同一把尺。
+  static const double _focusViewportFraction = 0.28;
 
-  void _alignToIndex(int index, {required int attempt}) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!_scrollController.hasClients) {
-        // Controller not attached yet (e.g. right after a mode switch while
-        // the crossfade is still settling) — retry for a few frames.
-        if (attempt < 8) _alignToIndex(index, attempt: attempt + 1);
-        return;
-      }
-      if (_userScrolling) return;      final position = _scrollController.position;
-      final headerExtent = widget.header != null ? 120.0 : 0.0;
+  /// 仅在完全没有任何已挂载行可供测量时使用的冷启动估值。
+  /// 它不是行高假设；真实行位置挂载后会重新校正。
+  static const double _bootstrapRowExtent = 175.0;
 
-      // Correction: find any mounted row and compare its real document
-      // offset against the estimate; apply the delta to the target.
-      double correction = 0;
-      for (final key in widget.itemKeys) {
-        final ctx = key.currentContext;
-        if (ctx == null) continue;
-        final box = ctx.findRenderObject();
-        if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-        final rowTopInViewport = box.localToGlobal(Offset.zero).dy;
-        final i = widget.itemKeys.indexOf(key);
-        final rowDocOffset = _scrollController.offset + rowTopInViewport;
-        final rowEstimate =
-            i * _estimatedRowHeight + headerExtent + _topSpacerExtent();
-        correction = rowDocOffset - rowEstimate;
-        break;
-      }
+  /// 仅供远距离跳转的未挂载间奏徽标估值。
+  /// 目标行挂载后会改用真实测量。
+  static const double _estimatedInterludeExtent = 44.0;
 
-      // 若目标行已挂载（如逐句自然推进 37→38），直接平滑对齐，绝不触发估算 jumpTo 引起抖动
-      final mountedCtx = (index >= 0 && index < widget.itemKeys.length)
-          ? widget.itemKeys[index].currentContext
-          : null;
-      if (mountedCtx != null) {
-        _alignRowIntoShape(mountedCtx);
-        _settleOnScreenMiddle(index);
-        return;
-      }
-
-      // 估算路径：还没挂载，先按"形状底边落屏幕中线"反推目标滚动量。
-      final estRowHeight = _estimatedRowHeight;
-      final target =
-          ((index * estRowHeight) +
-                  _topSpacerExtent() +
-                  headerExtent +
-                  correction -
-                  _desiredRowTopInViewport(estRowHeight))
-              .clamp(position.minScrollExtent, position.maxScrollExtent);
-      _scrollController.jumpTo(target);
-
-      // Fine alignment once the target row is mounted.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _userScrolling) return;
-        final ctx = (index >= 0 && index < widget.itemKeys.length)
-            ? widget.itemKeys[index].currentContext
-            : null;
-        if (ctx != null) {
-          _alignRowIntoShape(ctx);
-        } else if (attempt < 4) {
-          _alignToIndex(index, attempt: attempt + 1);
-        }
-      });
-    });
-  }
-
-  /// 落位自校正：布局稳定后再校准一次。
-  ///
-  /// 2026-10-20（灰色形状改为跟随当前句后）：目标不再是"对齐到固定形状的
-  /// 上沿"，而是"把当前句对齐到屏幕的上三分之一"。
-  /// 实测第一版只对齐一次**不够**：对齐之后布局还会变（视频区展开会把
-  /// 句子列表整体下推约 200px；模式切换、状态栏显隐同理）⇒ 刚对好的位置
-  /// 又偏了。所以这里在动画结束后连续几帧重新量一次，差多少补多少，
-  /// 直到落位（最多 4 轮）。
-  void _settleOnScreenMiddle(int index) {
-    var round = 0;
-    void step() {
-      if (!mounted || _userScrolling || round >= 4) return;
-      round++;
-      final ctx = (index >= 0 && index < widget.itemKeys.length)
-          ? widget.itemKeys[index].currentContext
-          : null;
-      if (ctx == null) return;
-      final box = ctx.findRenderObject();
-      if (box is! RenderBox || !box.attached || !box.hasSize) return;
-      if (!_scrollController.hasClients) return;
-      // 目标：当前句的上沿落在屏幕的上三分之一。
-      final targetTop = _desiredRowTopInViewport(box.size.height);
-      final rowTop = box.localToGlobal(Offset.zero).dy;
-      final delta = targetTop - (rowTop - _viewportTop());
-      if (delta.abs() < 2) return; // 已经落位
-      final position = _scrollController.position;
-      final target = (position.pixels - delta).clamp(
-        position.minScrollExtent,
-        position.maxScrollExtent,
-      );
-      _scrollController.jumpTo(target);
-      Future<void>.delayed(const Duration(milliseconds: 120), step);
-    }
-
-    Future<void>.delayed(const Duration(milliseconds: 260), step);
-  }
-
-  /// 列表顶部余量（半屏）—— 让第一句也能滚到上三分之一。
-  double _topSpacerExtent() => MediaQuery.sizeOf(context).height * 0.5;
-
-  /// 当前句卡片应该落在什么位置。
-  ///
-  /// 2026-10-20（灰色形状改为跟随当前句后）：不再有"钉在中线的固定形状"
-  /// 可对齐 ⇒ 改为把**当前句本身**对齐到视口的**上三分之一**（与读页
-  /// LessonReadingDocument 同一把尺：人的视线习惯落在画面中上部分）。
-  ///
-  /// 旧算法（对齐到固定形状上沿 / 屏幕中线）已随固定形状一起作废。
-  double _desiredRowTopInViewport(double rowHeight) {
-    final view = View.of(context);
-    final screenHeight = view.physicalSize.height / view.devicePixelRatio;
-    // 视口顶边在屏幕坐标里的位置：列表自身的渲染盒（= 可视区域）。
-    double viewportTop = 0.0;
-    final viewportBox = context.findRenderObject();
-    if (viewportBox is RenderBox && viewportBox.attached && viewportBox.hasSize) {
-      viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
-    }
-    // 上三分之一：视口高的 28% 处（读页用的是同一个比例）。
-    return screenHeight * _focusScreenFraction - viewportTop;
-  }
-
-  /// 当前句落在屏幕高度的哪个比例上（上三分之一 = 视觉中心区）。
-  static const double _focusScreenFraction = 0.28;
+  static const int _maxAlignmentAttempts = 5;
+  static const int _maxAttachAttempts = 8;
 
   @override
   void initState() {
     super.initState();
-    _transition.addStatusListener(_onTransitionStatus);
-    if (widget.currentIndex > 0) {
-      _autoScrollToIndex(widget.currentIndex);
-    }
-  }
 
+    _syncOwnedItemKeys();
 
-  void _onTransitionStatus(AnimationStatus status) {
-    if (status == AnimationStatus.completed && mounted) {
-      setState(() => _fromIndex = null);
-    }
+    // 第 0 句也必须定位，不能只在 currentIndex > 0 时处理。
+    _requestAlignment(widget.currentIndex, animate: false);
   }
 
   @override
-  void dispose() {
-    _resumeTimer?.cancel();
-    _scrollController.dispose();
-    _transition.dispose();
-    super.dispose();
+  void didUpdateWidget(covariant SentencePageList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    _syncOwnedItemKeys();
+
+    if (widget.onVisibleIndexChanged != oldWidget.onVisibleIndexChanged) {
+      _lastReportedVisibleIndex = null;
+    }
+
+    final sentencesChanged =
+        !listEquals(widget.sentences, oldWidget.sentences);
+
+    final preferencesChanged =
+        widget.preferences.textScale != oldWidget.preferences.textScale ||
+        widget.preferences.pinyinScale != oldWidget.preferences.pinyinScale ||
+        widget.preferences.learningChineseFont.family !=
+            oldWidget.preferences.learningChineseFont.family;
+
+    final layoutChanged = sentencesChanged ||
+        preferencesChanged ||
+        widget.showEnglish != oldWidget.showEnglish ||
+        widget.showChinese != oldWidget.showChinese ||
+        widget.isChineseMode != oldWidget.isChineseMode;
+
+    final revealChanged = widget.revealToken != oldWidget.revealToken;
+    final indexChanged = widget.currentIndex != oldWidget.currentIndex;
+
+    if (layoutChanged || revealChanged) {
+      // 数据或显示布局变化时，立即对齐最终布局，而不是动画中途
+      // 再用旧的估算结果修正。
+      _takeOverScrolling();
+      _lastReportedVisibleIndex = null;
+      _requestAlignment(widget.currentIndex, animate: false);
+    } else if (indexChanged) {
+      // 正常逐句推进只发起一项新的平滑定位。
+      _takeOverScrolling();
+      _requestAlignment(widget.currentIndex, animate: true);
+    }
   }
 
-  int _computeVisibleIndex() {
-    if (!_scrollController.hasClients) return widget.currentIndex;
-    final offset = _scrollController.offset;
-    final headerExtent = widget.header != null ? 120.0 : 0.0;
-    // 焦点线 = **手机屏幕**的中线（与定位对齐同一把尺，见 _desiredRowTopInViewport）。
-    // 手指滑动时"当前句"跟着焦点线走，两处必须一致，否则会出现"看着在读
-    // 上一句、进度却记到下一句"的错位。
-    final focusY = _desiredRowTopInViewport(0).clamp(0.0, double.infinity);
+  void _syncOwnedItemKeys() {
+    while (_ownedItemKeys.length < widget.sentences.length) {
+      final index = _ownedItemKeys.length;
+      _ownedItemKeys.add(
+        GlobalKey(debugLabel: 'SentencePageList.row.$index'),
+      );
+    }
 
-    int bestIndex = -1;
-    double minDiff = double.infinity;
+    while (_ownedItemKeys.length > widget.sentences.length) {
+      _ownedItemKeys.removeLast();
+    }
+  }
 
-    for (int i = 0; i < widget.itemKeys.length; i++) {
-      final ctx = widget.itemKeys[i].currentContext;
-      if (ctx == null) continue;
-      final box = ctx.findRenderObject();
-      if (box is! RenderBox || !box.attached || !box.hasSize) continue;
-      final dy = box.localToGlobal(Offset.zero).dy;
-      final diff = (dy - focusY).abs();
-      if (diff < minDiff) {
-        minDiff = diff;
-        bestIndex = i;
+  GlobalKey _keyForSentence(int index) {
+    if (index < widget.itemKeys.length) {
+      return widget.itemKeys[index];
+    }
+    return _ownedItemKeys[index];
+  }
+
+  void _onRowMounted(int index) {
+    _mountedRowIndices.add(index);
+  }
+
+  void _onRowUnmounted(int index) {
+    _mountedRowIndices.remove(index);
+  }
+
+  RenderBox? _renderBoxForContext(BuildContext? context) {
+    if (context == null) return null;
+
+    final object = context.findRenderObject();
+    if (object is! RenderBox || !object.attached || !object.hasSize) {
+      return null;
+    }
+    return object;
+  }
+
+  RenderBox? get _viewportBox =>
+      _renderBoxForContext(_viewportKey.currentContext);
+
+  /// 焦点线在**屏幕**上的 Y ＝ 视口顶 ＋ 视口高 × 比例。
+  double _focusScreenY(RenderBox viewport) {
+    return _viewportTop(viewport) + viewport.size.height * _focusViewportFraction;
+  }
+
+  double _viewportTop(RenderBox viewport) {
+    return viewport.localToGlobal(Offset.zero).dy;
+  }
+
+  /// 焦点线是否可用。
+  ///
+  /// 视口相对的口径下，焦点线**必然落在视口内** ⇒ 只要视口有高度就可达。
+  /// （旧实现按屏幕 28% 算，真机上听页的焦点线在视口外 ⇒ 判定不可达
+  ///   ⇒ 列表不滚、当前句会滚出屏幕。）
+  bool _focusIsReachable(RenderBox viewport) {
+    return viewport.size.height > 0;
+  }
+
+  /// 列表上下留白：让**第一句/最后一句**也能被滚到焦点线。
+  ///
+  /// 需要的留白 ＝ 视口高 × (1 − 焦点比例)：当前句要落在焦点线上，
+  /// 它上方/下方的内容就得有这么多余量。按视口算（不按屏幕算），
+  /// 否则听页上方有封面区时余量不够，首句永远够不到焦点线。
+  double _spacerExtent(double viewportHeight) {
+    return viewportHeight * (1 - _focusViewportFraction);
+  }
+
+  /// 根据已挂载目标行的真实全局位置计算滚动偏移。
+  ///
+  /// 正常切句不使用行高估算。
+  double? _scrollOffsetForRow(
+    RenderBox rowBox,
+    RenderBox viewport,
+  ) {
+    if (!_focusIsReachable(viewport)) return null;
+    if (!_scrollController.hasClients) return null;
+
+    final position = _scrollController.position;
+    final rowTopGlobal = rowBox.localToGlobal(Offset.zero).dy;
+
+    // 向下滚动 delta 时，行的全局 Y 坐标会减少 delta。
+    // 因此：目标偏移 = 当前偏移 + 行顶部 Y - 焦点线 Y。
+    final target =
+        position.pixels + rowTopGlobal - _focusScreenY(viewport);
+
+    return target
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+  }
+
+  /// 请求一次新的定位。新请求会使旧请求的异步回调失效。
+  void _requestAlignment(
+    int requestedIndex, {
+    required bool animate,
+  }) {
+    final generation = ++_alignmentGeneration;
+
+    _alignmentCheckTimer?.cancel();
+    _alignmentCheckTimer = null;
+
+    if (widget.sentences.isEmpty) {
+      _cancelActiveScrollAtCurrentOffset();
+      return;
+    }
+
+    final index = requestedIndex
+        .clamp(0, widget.sentences.length - 1)
+        .toInt();
+
+    _scheduleAlignment(
+      index,
+      generation: generation,
+      animate: animate,
+      attempt: 0,
+    );
+  }
+
+  void _takeOverScrolling() {
+    _userScrolling = false;
+    _resumeTimer?.cancel();
+    _resumeTimer = null;
+
+    _alignmentCheckTimer?.cancel();
+    _alignmentCheckTimer = null;
+  }
+
+  /// 使旧的滚动活动停止，但不改变当前像素位置。
+  ///
+  /// 特别是目标已经对齐时，也必须防止旧动画继续向旧目标移动。
+  void _cancelActiveScrollAtCurrentOffset() {
+    if (!_scrollController.hasClients) return;
+
+    final position = _scrollController.position;
+    if (position.isScrollingNotifier.value) {
+      _scrollController.jumpTo(position.pixels);
+    }
+  }
+
+  /// 平滑滚动使用与位移成比例的时长，避免大跨度时移动过快。
+  ///
+  /// 线性曲线用于歌词式流动：每次切句时从当前位置重新计算目标，
+  /// 而不是每次都从 ease-out 曲线的高速段重新开始。
+  Future<void> _moveToOffset(
+    double target, {
+    required bool animate,
+  }) {
+    if (!_scrollController.hasClients) {
+      return Future<void>.value();
+    }
+
+    final position = _scrollController.position;
+
+    final clampedTarget = target
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+
+    final distance = (clampedTarget - position.pixels).abs();
+
+    if (distance < 0.75) {
+      _cancelActiveScrollAtCurrentOffset();
+      return Future<void>.value();
+    }
+
+    if (!animate) {
+      _scrollController.jumpTo(clampedTarget);
+      return Future<void>.value();
+    }
+
+    final milliseconds =
+        (distance / 0.75).round().clamp(160, 420).toInt();
+
+    return _scrollController.animateTo(
+      clampedTarget,
+      duration: Duration(milliseconds: milliseconds),
+      curve: Curves.linear,
+    );
+  }
+
+  void _scheduleAlignment(
+    int index, {
+    required int generation,
+    required bool animate,
+    required int attempt,
+  }) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _alignmentGeneration) return;
+      if (_userScrolling) return;
+
+      if (!_scrollController.hasClients) {
+        if (attempt < _maxAttachAttempts) {
+          _scheduleAlignment(
+            index,
+            generation: generation,
+            animate: animate,
+            attempt: attempt + 1,
+          );
+        }
+        return;
+      }
+
+      final viewport = _viewportBox;
+      if (viewport == null) {
+        if (attempt < _maxAttachAttempts) {
+          _scheduleAlignment(
+            index,
+            generation: generation,
+            animate: animate,
+            attempt: attempt + 1,
+          );
+        }
+        return;
+      }
+
+      if (!_focusIsReachable(viewport)) {
+        _cancelActiveScrollAtCurrentOffset();
+        return;
+      }
+
+      final rowBox = _renderBoxForContext(
+        _keyForSentence(index).currentContext,
+      );
+
+      if (rowBox != null) {
+        final target = _scrollOffsetForRow(rowBox, viewport);
+
+        if (target == null) {
+          _cancelActiveScrollAtCurrentOffset();
+          return;
+        }
+
+        final movement = _moveToOffset(target, animate: animate);
+
+        // 只复核一次。若父布局在滚动后发生变化，进行平滑校正；
+        // 不再运行多轮延迟 jumpTo。
+        unawaited(
+          movement.then((_) {
+            if (!mounted || generation != _alignmentGeneration) return;
+            _scheduleAlignmentCheck(index, generation);
+          }),
+        );
+        return;
+      }
+
+      // 目标行尚未挂载。只能用估算把列表移到目标附近，
+      // 随后等待实际行挂载，再用真实坐标对齐。
+      if (attempt >= _maxAlignmentAttempts) return;
+
+      final estimate = _estimateTargetOffset(index, viewport);
+      final movement = _moveToOffset(estimate, animate: animate);
+
+      if (animate) {
+        unawaited(
+          movement.then((_) {
+            if (!mounted || generation != _alignmentGeneration) return;
+
+            _scheduleAlignment(
+              index,
+              generation: generation,
+              animate: true,
+              attempt: attempt + 1,
+            );
+          }),
+        );
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || generation != _alignmentGeneration) return;
+
+          _scheduleAlignment(
+            index,
+            generation: generation,
+            animate: false,
+            attempt: attempt + 1,
+          );
+        });
+      }
+    });
+  }
+
+  /// 对齐动画完成后的单次复核。
+  ///
+  /// 如果视口因父组件布局变化而移动，才重新计算目标。
+  /// 新切句、手指滚动或新定位请求都会取消这次复核。
+  void _scheduleAlignmentCheck(int index, int generation) {
+    _alignmentCheckTimer?.cancel();
+
+    _alignmentCheckTimer = Timer(
+      const Duration(milliseconds: 260),
+      () {
+        if (!mounted || generation != _alignmentGeneration) return;
+        if (_userScrolling || !_scrollController.hasClients) return;
+        if (index < 0 || index >= widget.sentences.length) return;
+
+        final viewport = _viewportBox;
+        final rowBox = _renderBoxForContext(
+          _keyForSentence(index).currentContext,
+        );
+
+        if (viewport == null || rowBox == null) return;
+
+        final target = _scrollOffsetForRow(rowBox, viewport);
+
+        if (target == null) {
+          _cancelActiveScrollAtCurrentOffset();
+          return;
+        }
+
+        if ((target - _scrollController.position.pixels).abs() >= 2.0) {
+          // 复核只在检测到真实偏差时触发，而且仍然是平滑移动。
+          unawaited(_moveToOffset(target, animate: true));
+        }
+      },
+    );
+  }
+
+  bool _hasInterludeAfter(int index) {
+    if (index < 0 || index + 1 >= widget.sentences.length) {
+      return false;
+    }
+
+    final sentence = widget.sentences[index];
+    final next = widget.sentences[index + 1];
+
+    return next.startMs - sentence.endMs >= 10000;
+  }
+
+  List<_MeasuredRow> _measureMountedRows() {
+    final rows = <_MeasuredRow>[];
+
+    for (final index in _mountedRowIndices) {
+      if (index < 0 || index >= widget.sentences.length) continue;
+
+      final box = _renderBoxForContext(
+        _keyForSentence(index).currentContext,
+      );
+
+      if (box == null) continue;
+
+      rows.add(
+        _MeasuredRow(
+          index: index,
+          top: box.localToGlobal(Offset.zero).dy,
+          height: box.size.height,
+        ),
+      );
+    }
+
+    rows.sort((a, b) => a.index.compareTo(b.index));
+    return rows;
+  }
+
+  double _measuredHeaderHeight() {
+    final box = _renderBoxForContext(_headerKey.currentContext);
+    return box?.size.height ?? 0.0;
+  }
+
+  /// 只用于目标行尚未挂载的跳转路径。
+  ///
+  /// 优先使用最近的已挂载行作为锚点，并使用当前挂载行的平均高度。
+  /// 对尚未测量的行和间奏徽标使用估值；真实目标挂载后会再对齐。
+  double _estimateTargetOffset(int targetIndex, RenderBox viewport) {
+    final position = _scrollController.position;
+    final viewportTop = _viewportTop(viewport);
+    // 焦点线在**视口内**的位置（视口局部坐标）。
+    final desiredLocalTop = viewport.size.height * _focusViewportFraction;
+
+    final measured = _measureMountedRows();
+
+    double averageHeight = _bootstrapRowExtent;
+
+    if (measured.isNotEmpty) {
+      var totalHeight = 0.0;
+
+      for (final row in measured) {
+        totalHeight += row.height;
+      }
+
+      averageHeight = totalHeight / measured.length;
+    }
+
+    final measuredByIndex = <int, _MeasuredRow>{
+      for (final row in measured) row.index: row,
+    };
+
+    double extentAfter(int index) {
+      final rowHeight = measuredByIndex[index]?.height ?? averageHeight;
+      final interludeHeight =
+          _hasInterludeAfter(index) ? _estimatedInterludeExtent : 0.0;
+
+      return rowHeight + interludeHeight;
+    }
+
+    double targetDocumentTop;
+
+    if (measured.isNotEmpty) {
+      // 选离目标索引最近的真实挂载行作为锚点。
+      var anchor = measured.first;
+
+      for (final row in measured.skip(1)) {
+        if ((row.index - targetIndex).abs() <
+            (anchor.index - targetIndex).abs()) {
+          anchor = row;
+        }
+      }
+
+      // 内容文档坐标 = 当前滚动偏移 + 行在视口中的局部坐标。
+      final anchorDocumentTop =
+          position.pixels + anchor.top - viewportTop;
+
+      targetDocumentTop = anchorDocumentTop;
+
+      if (targetIndex > anchor.index) {
+        for (var i = anchor.index; i < targetIndex; i++) {
+          targetDocumentTop += extentAfter(i);
+        }
+      } else {
+        for (var i = targetIndex; i < anchor.index; i++) {
+          targetDocumentTop -= extentAfter(i);
+        }
+      }
+    } else {
+      // 极端冷启动：连一行字幕都尚未挂载。
+      // 标题优先使用真实高度；暂时无法测量时只作为初始估值。
+      targetDocumentTop = _spacerExtent(viewport.size.height) + _measuredHeaderHeight();
+
+      for (var i = 0; i < targetIndex; i++) {
+        targetDocumentTop += extentAfter(i);
       }
     }
 
-    if (bestIndex != -1) return bestIndex;
+    final target = targetDocumentTop - desiredLocalTop;
 
-    final est =
-        ((offset + focusY - headerExtent - _topSpacerExtent()) /
-                _estimatedRowHeight)
-            .round();
-    return est.clamp(0, widget.sentences.length - 1);
+    return target
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+  }
+
+  int _safeCurrentIndex() {
+    if (widget.sentences.isEmpty) return widget.currentIndex;
+
+    return widget.currentIndex
+        .clamp(0, widget.sentences.length - 1)
+        .toInt();
+  }
+
+  int _computeVisibleIndex() {
+    if (widget.sentences.isEmpty) return widget.currentIndex;
+
+    final viewport = _viewportBox;
+    if (viewport == null || !_focusIsReachable(viewport)) {
+      return _safeCurrentIndex();
+    }
+
+    final focusY = _focusScreenY(viewport);
+
+    var bestIndex = -1;
+    var minDiff = double.infinity;
+
+    // 只遍历已经挂载的行，不扫描整篇课文。
+    for (final index in _mountedRowIndices) {
+      if (index < 0 || index >= widget.sentences.length) continue;
+
+      final box = _renderBoxForContext(
+        _keyForSentence(index).currentContext,
+      );
+
+      if (box == null) continue;
+
+      final rowTopGlobal = box.localToGlobal(Offset.zero).dy;
+      final diff = (rowTopGlobal - focusY).abs();
+
+      if (diff < minDiff) {
+        minDiff = diff;
+        bestIndex = index;
+      }
+    }
+
+    return bestIndex >= 0 ? bestIndex : _safeCurrentIndex();
   }
 
   bool _onNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+
     if (notification is UserScrollNotification) {
       if (notification.direction != ScrollDirection.idle) {
         _userScrolling = true;
         _resumeTimer?.cancel();
+        _alignmentCheckTimer?.cancel();
       } else {
         _resumeTimer?.cancel();
-        _resumeTimer = Timer(const Duration(milliseconds: 600), () {
-          if (mounted) {
-            _userScrolling = false;
-          }
-        });
+
+        _resumeTimer = Timer(
+          const Duration(milliseconds: 600),
+          () {
+            if (mounted) {
+              _userScrolling = false;
+            }
+          },
+        );
       }
     }
+
     if (notification is ScrollUpdateNotification) {
-      widget.onVisibleIndexChanged?.call(_computeVisibleIndex());
+      final index = _computeVisibleIndex();
+
+      // 回调仍然表示焦点线对应的可见句子，只过滤重复的同一索引。
+      if (index != _lastReportedVisibleIndex) {
+        _lastReportedVisibleIndex = index;
+        widget.onVisibleIndexChanged?.call(index);
+      }
     }
+
     return false;
   }
 
-  /// 把某一行的**上沿**对齐到屏幕的上三分之一（当前句的视觉中心位）。
-  ///
-  /// 2026-10-20（灰色形状改为跟随当前句后）：不再有"固定形状"可对齐 ⇒
-  /// 改为把当前句本身滚到上三分之一，形状跟着它走。
-  void _alignRowIntoShape(BuildContext rowContext) {
-    final box = rowContext.findRenderObject();
-    if (box is! RenderBox || !box.attached || !box.hasSize) return;
-    if (!_scrollController.hasClients) return;
-    final targetTop = _desiredRowTopInViewport(box.size.height);
-    final rowTop = box.localToGlobal(Offset.zero).dy;
-    final currentInViewport = rowTop - _viewportTop();
-    final delta = targetTop - currentInViewport;
-    if (delta.abs() < 0.5) return;
-    final position = _scrollController.position;
-    final target = (position.pixels - delta).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    _scrollController.animateTo(
-      target,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-    );
-  }
-
-  double _viewportTop() {
-    final box = context.findRenderObject();
-    if (box is RenderBox && box.attached && box.hasSize) {
-      return box.localToGlobal(Offset.zero).dy;
-    }
-    return 0.0;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasHeader = widget.header != null;
-    // 2026-10-20 郭老师（音乐播放器式歌词）：当前句的**形状**要钉在屏幕
-    // 中线上，别的句子在它下面流过去。
-    //
-    // 要做到"每一句"都能钉在中线上，列表**上下都得留半屏余量**：
-    //  · 底部余量：最后一句下面没东西可滚 ⇒ 形状永远停在屏幕下缘；
-    //  · 顶部余量：第一句上面没东西可滚 ⇒ 形状永远停在屏幕顶附近。
-    // 少了任何一头，被锚定的那句就会差半个屏幕。
-    final halfScreen = MediaQuery.sizeOf(context).height * 0.5;
-    final totalCount =
-        widget.sentences.length + (hasHeader ? 1 : 0) + 2; // +上下余量
-
-    return NotificationListener<ScrollNotification>(
-      onNotification: _onNotification,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return Stack(
-            children: [
-              // ① 当前句的**形状**：2026-10-20 改为**跟随当前句**（原先是钉在
-              // 屏幕中线上的固定聚光块，见郭老师「它不动感觉怪怪的」）。
-              // ⇒ 形状画在**当前句那一行**里（见 _SentenceRow 的 decoration），
-              // 这里不再叠一块固定块。
-              //
-              // ② 字幕（滚动的）
-              ListView.builder(
-                controller: _scrollController,
-                itemCount: totalCount,
-                itemBuilder: (context, index) {
-                  // index 0 = 顶部余量
-                  if (index == 0) {
-                    return SizedBox(height: halfScreen);
-                  }
-                  if (hasHeader && index == 1) {
-                    return widget.header!;
-                  }
-                  final lastIndex = totalCount - 1;
-                  if (index == lastIndex) {
-            // 底部余量
-            return SizedBox(height: halfScreen);
-          }
-
-          final sentenceIndex = hasHeader ? index - 2 : index - 1;
-          final sentence = widget.sentences[sentenceIndex];
-          final rowWidget = _animatedRow(sentenceIndex, sentence);
-
-          // Check if there is a large gap between this sentence and the next
-          if (sentenceIndex < widget.sentences.length - 1) {
-            final next = widget.sentences[sentenceIndex + 1];
-            final gapMs = next.startMs - sentence.endMs;
-            if (gapMs >= 10000) {
-              final minutes = (gapMs / 60000).floor();
-              final seconds = ((gapMs % 60000) / 1000).round();
-              final timeStr = '$minutes:${seconds.toString().padLeft(2, '0')}';
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  rowWidget,
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.ll.textPrimary.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: context.ll.textPrimary.withValues(alpha: 0.1),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.music_note_rounded,
-                            size: 14,
-                            color: context.ll.textTertiary,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '♪ 剧情配乐 / 原声留白 ($timeStr)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: context.ll.textTertiary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            }
-          }
-
-          return rowWidget;
-                },
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  /// Wraps the two rows involved in a sentence switch with a smooth vertical
-  /// flow transition; every other row renders unchanged.
-  Widget _animatedRow(int index, Sentence sentence) {
-    Key? rowKey;
-    if (index < widget.itemKeys.length) {
-      rowKey = widget.itemKeys[index];
-    }
-    Widget row = _SentenceRow(
-      key: rowKey,
+  Widget _buildSentenceRow(int index, Sentence sentence) {
+    final row = _SentenceRow(
+      key: _keyForSentence(index),
       sentence: sentence,
       index: index,
       isCurrent: index == widget.currentIndex,
-      currentPosition: index == widget.currentIndex ? widget.currentPosition : null,
+      currentPosition:
+          index == widget.currentIndex ? widget.currentPosition : null,
       showEnglish: widget.showEnglish,
       showChinese: widget.showChinese,
       isChineseMode: widget.isChineseMode,
@@ -510,27 +689,221 @@ class _SentencePageListState extends State<SentencePageList>
       onSentenceTap: widget.onSentenceTap,
     );
 
-    final from = _fromIndex;
-    if (from == null || !_transition.isAnimating) return row;
-    if (index != from && index != widget.currentIndex) return row;
-
-    final curved = CurvedAnimation(
-      parent: _transition,
-      curve: Curves.easeOutCubic,
+    return _RowMountTracker(
+      index: index,
+      onMounted: _onRowMounted,
+      onUnmounted: _onRowUnmounted,
+      child: row,
     );
-    if (index == from) {
-      final slide = Tween<Offset>(
-        begin: Offset.zero,
-        end: Offset(0, -_direction * 0.02),
-      ).animate(curved);
-      return SlideTransition(position: slide, child: row);
-    }
-    final slide = Tween<Offset>(
-      begin: Offset(0, _direction * 0.035),
-      end: Offset.zero,
-    ).animate(curved);
-    return SlideTransition(position: slide, child: row);
   }
+
+  @override
+  Widget build(BuildContext context) {
+    // 焦点线与上下留白都按**视口**算（听页上方有封面/媒体区，按屏幕算会算错），
+    // 所以先拿到视口高度再构建列表。
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportHeight = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : MediaQuery.sizeOf(context).height;
+        return _buildViewport(context, viewportHeight);
+      },
+    );
+  }
+
+  Widget _buildViewport(BuildContext context, double viewportHeight) {
+    final hasHeader = widget.header != null;
+    final spacer = _spacerExtent(viewportHeight);
+
+    final totalCount =
+        widget.sentences.length + (hasHeader ? 1 : 0) + 2;
+
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onNotification,
+      child: Stack(
+        key: _viewportKey,
+        children: [
+          ListView.builder(
+            controller: _scrollController,
+
+            // 坐标由本组件统一计算，避免 ListView 自动添加安全区 padding。
+            padding: EdgeInsets.zero,
+
+            itemCount: totalCount,
+            itemBuilder: (context, index) {
+              // 顶部留白：允许第一句向上滚到 28% 焦点线。
+              if (index == 0) {
+                return SizedBox(height: spacer);
+              }
+
+              if (hasHeader && index == 1) {
+                return KeyedSubtree(
+                  key: _headerKey,
+                  child: widget.header!,
+                );
+              }
+
+              // 最后一个 item 是底部留白。
+              final lastIndex = totalCount - 1;
+
+              if (index == lastIndex) {
+                return SizedBox(height: spacer);
+              }
+
+              final sentenceIndex = hasHeader ? index - 2 : index - 1;
+
+              if (sentenceIndex < 0 ||
+                  sentenceIndex >= widget.sentences.length) {
+                return const SizedBox.shrink();
+              }
+
+              final sentence = widget.sentences[sentenceIndex];
+              final rowWidget = _buildSentenceRow(
+                sentenceIndex,
+                sentence,
+              );
+
+              // 保留原有的长间奏提示。
+              if (sentenceIndex < widget.sentences.length - 1) {
+                final next = widget.sentences[sentenceIndex + 1];
+                final gapMs = next.startMs - sentence.endMs;
+
+                if (gapMs >= 10000) {
+                  final minutes = (gapMs / 60000).floor();
+                  final seconds = ((gapMs % 60000) / 1000).round();
+                  final timeStr =
+                      '$minutes:${seconds.toString().padLeft(2, '0')}';
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      rowWidget,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: context.ll.textPrimary.withValues(
+                              alpha: 0.05,
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: context.ll.textPrimary.withValues(
+                                alpha: 0.1,
+                              ),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.music_note_rounded,
+                                size: 14,
+                                color: context.ll.textTertiary,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                '♪ 剧情配乐 / 原声留白 ($timeStr)',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.ll.textTertiary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                }
+              }
+
+              return rowWidget;
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    // 使尚未执行的异步定位任务全部失效。
+    _alignmentGeneration++;
+
+    _resumeTimer?.cancel();
+    _alignmentCheckTimer?.cancel();
+
+    _scrollController.dispose();
+
+    super.dispose();
+  }
+}
+
+/// 一行字幕当前是否挂载的轻量跟踪器。
+///
+/// 这不是额外的动画控制器，也不会触发父组件 setState。
+class _RowMountTracker extends StatefulWidget {
+  const _RowMountTracker({
+    required this.index,
+    required this.onMounted,
+    required this.onUnmounted,
+    required this.child,
+  });
+
+  final int index;
+  final ValueChanged<int> onMounted;
+  final ValueChanged<int> onUnmounted;
+  final Widget child;
+
+  @override
+  State<_RowMountTracker> createState() => _RowMountTrackerState();
+}
+
+class _RowMountTrackerState extends State<_RowMountTracker> {
+  @override
+  void initState() {
+    super.initState();
+    widget.onMounted(widget.index);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RowMountTracker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.index != widget.index) {
+      oldWidget.onUnmounted(oldWidget.index);
+      widget.onMounted(widget.index);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.onUnmounted(widget.index);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+class _MeasuredRow {
+  const _MeasuredRow({
+    required this.index,
+    required this.top,
+    required this.height,
+  });
+
+  final int index;
+  final double top;
+  final double height;
 }
 
 class _SentenceRow extends StatelessWidget {
@@ -562,27 +935,12 @@ class _SentenceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ll = palette;
+
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      // 2026-10-20（GPT 镜像评审 §四 P2）：**句子不是卡片流，是课文段落**。
-      // 未选中的句子不画底、不画框、不画圆角，只靠留白分开。
-      //
-      // ⚠️ 但**所有行的外边距、左侧留白、边框宽度必须完全一致**：
-      // 2026-10-20 郭老师报「字幕当前播放句子的形状标注位置错了」+「音频往
-      // 后面走，字幕却往上面走」—— 根因就是这里：当前句原本有**更大的竖向
-      // 外边距**（句子之间留白多）和**额外的左内边距**（形状往右挪），
-      // 于是"当前态"一变，整列字幕先横向错位、再纵向爬 4~8px。
-      //
-      // 2026-10-20（郭老师：「读的那个页面字幕，灰色形状改为跟随吧……
-      // 它不动感觉怪怪的」）：灰色形状**改为跟随当前句**（不再是钉在屏幕
-      // 中线的那块固定聚光块）。做法与读页同一套视觉语言：当前句那行
-      // 浅底 + 左侧 2dp 强调线，别的行干净。
-      //
-      // 为守住"一行都不抖"：**所有行的几何完全一致**——外边距、左内边距、
-      // 边框宽度恒定，只换颜色。不换颜色的行画的是**透明**边框（宽度仍是
-      // 2dp），绝不能写 `width: 0`（那是 hairline，配圆角会 paint 断言
-      // 失败 ⇒ 整行画不出来）。
+      // 只动画背景色与强调线颜色。
+      // 外边距、内边距、边框宽度始终不变。
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.linear,
       margin: const EdgeInsets.symmetric(vertical: 4),
       padding: EdgeInsets.zero,
       decoration: BoxDecoration(
@@ -592,6 +950,7 @@ class _SentenceRow extends StatelessWidget {
         borderRadius: const BorderRadius.all(Radius.circular(10)),
         border: Border(
           left: BorderSide(
+            // 必须恒为 2dp，只改变颜色。
             width: 2,
             color: isCurrent
                 ? ll.textPrimary.withValues(alpha: 0.75)
@@ -603,66 +962,73 @@ class _SentenceRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(LLRadius.small),
         onTap: () => onSentenceTap(index),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 6,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
+              // 文字使用目标状态的最终样式，不再逐帧插值字体度量。
+              Text(
+                '${index + 1}',
                 style: LLText.counter.copyWith(
                   fontSize: 12,
                   color: isCurrent ? ll.textPrimary : ll.textSecondary,
                 ),
-                child: Text('${index + 1}'),
               ),
               if (isChineseMode) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: ChineseTextbookRubyLayout(
                     text: sentence.originalText,
-                    charSize: (20 * preferences.textScale).clamp(6.0, 36.0),
-                    charStyle: TextStyle(
-                      fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
-                      color: isCurrent ? ll.textPrimary : ll.textSecondary,
+                    charSize: (20 * preferences.textScale).clamp(
+                      6.0,
+                      36.0,
                     ),
-                    chineseFontFamily: preferences.learningChineseFont.family,
+                    charStyle: TextStyle(
+                      fontWeight:
+                          isCurrent ? FontWeight.w600 : FontWeight.w400,
+                      color:
+                          isCurrent ? ll.textPrimary : ll.textSecondary,
+                    ),
+                    chineseFontFamily:
+                        preferences.learningChineseFont.family,
                     pinyinScale: preferences.pinyinScale,
                     textAlign: TextAlign.left,
                     wordSpacing: 6.0,
                     lineSpacing: 10.0,
-                    activeCharIndex: isCurrent && currentPosition != null
-                        ? sentence.activeCharIndexAt(currentPosition!.inMilliseconds)
-                        : null,
+                    activeCharIndex:
+                        isCurrent && currentPosition != null
+                            ? sentence.activeCharIndexAt(
+                                currentPosition!.inMilliseconds,
+                              )
+                            : null,
                   ),
                 ),
               ] else ...[
                 if (showEnglish)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 260),
-                      curve: Curves.easeOutCubic,
+                    child: Text(
+                      sentence.english,
                       style: LLLearning.transcriptEnglish(
                         ll,
                         preferences,
                         current: isCurrent,
                       ),
-                      child: Text(sentence.english),
                     ),
                   ),
                 if (showChinese)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 260),
-                      curve: Curves.easeOutCubic,
+                    child: Text(
+                      sentence.chinese,
                       style: LLLearning.transcriptChinese(
                         ll,
                         preferences,
                         current: isCurrent,
                       ),
-                      child: Text(sentence.chinese),
                     ),
                   ),
               ],

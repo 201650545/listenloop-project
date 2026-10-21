@@ -100,12 +100,20 @@ sherpa.OfflineRecognizer _buildRecognizer(Map<String, Object> payload) {
     );
   } else if (modelKind == 'zipformer_ctc') {
     // sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16（中文·手机主力，~60MB，31/31 字级时间戳）
+    //
+    // ⚠️ 2026-10-21 真机实测修复：**不要传 `modelType: 'zipformer_ctc'`**。
+    //   sherpa C++ 的合法 modelType 没有 'zipformer_ctc'（合法的是
+    //   'zipformer2' / 'zipformer' / 'paraformer' / 'nemo_ctc' / …），
+    //   传一个不认的值 ⇒ 解码器走错分支 ⇒ **text 变成乱码**
+    //   （真机日志实证：text="眼镛"、tokens="▁ƍĩ▁ƎŁŢ▁Ɛĸľ"）。
+    //   同一模型 + 同一 tokens.txt，在 PC 端不传 modelType 时输出**完整中文**
+    //   （「小蝌蚪找妈妈池塘里有一群小蝌蚪…」）。
+    //   ⇒ 这里**不传 modelType**（留空，走 sherpa 默认的 CTC 路径）。
     modelConfig = sherpa.OfflineModelConfig(
       zipformerCtc: sherpa.OfflineZipformerCtcModelConfig(
         model: '$dir$sep${payload['singleModel']}',
       ),
       tokens: '$dir$sep${payload['tokens']}',
-      modelType: 'zipformer_ctc',
       numThreads: int.tryParse(payload['threads'] as String? ?? '') ??
           kDefaultAsrThreads,
       debug: false,

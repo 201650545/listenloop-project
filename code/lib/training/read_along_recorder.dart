@@ -348,6 +348,55 @@ class ReadAlongWavBuilder {
   }
 }
 
+/// 固定容量 PCM 环形缓冲（整课连续收音的**滑动识别窗口**）。
+///
+/// 2026-10-20 读页重构 §四：整课连续识别不能每次都重跑**整段累计音频**
+/// （那是 O(n²)：越读到后面越慢）。改成固定容量的环，只留最近 N 毫秒，
+/// 每次识别一个滑动窗口 —— 识别量恒定，延迟恒定。
+class PcmRingBuffer {
+  PcmRingBuffer(int capacityBytes)
+      : _buf = Uint8List(capacityBytes < 1 ? 1 : capacityBytes);
+
+  final Uint8List _buf;
+  int _write = 0;
+  int _filled = 0;
+
+  /// 当前缓冲里的字节数（最多 = 容量）。
+  int get length => _filled;
+
+  /// 写入一块 PCM。
+  void add(Uint8List bytes) {
+    final cap = _buf.length;
+    for (var i = 0; i < bytes.length; i++) {
+      _buf[_write] = bytes[i];
+      _write = _write + 1 >= cap ? 0 : _write + 1;
+      if (_filled < cap) _filled++;
+    }
+  }
+
+  /// 按写入顺序拷出当前内容。
+  Uint8List toBytes() {
+    final out = Uint8List(_filled);
+    if (_filled == 0) return out;
+    final cap = _buf.length;
+    final start = (_write - _filled + cap) % cap;
+    if (start + _filled <= cap) {
+      out.setRange(0, _filled, _buf, start);
+    } else {
+      final first = cap - start;
+      out.setRange(0, first, _buf, start);
+      out.setRange(first, _filled, _buf, 0);
+    }
+    return out;
+  }
+
+  /// 清空（重开一段时用）。
+  void clear() {
+    _write = 0;
+    _filled = 0;
+  }
+}
+
 /// 跟读收音器（方案 §六.3）：录音 + 临时 wav + 能量法端点检测的封装。
 ///
 /// 生命周期由上层（跟读控制器）持有；每次 [start] 产出一个新临时 wav，
@@ -359,8 +408,22 @@ class ReadAlongRecorder {
     this.rmsThreshold = 0.008,
     this.inputSampleRate = 48000,
     Future<Directory> Function()? tempDir,
+    this.onPcm,
   })  : _mic = mic ?? RecordMic(),
         _tempDir = tempDir ?? _defaultTempDir;
+
+  /// **PCM 旁路**（2026-10-21 流式识别）：每收到一块 16kHz 单声道 PCM 就
+  /// 回调一次。
+  ///
+  /// 为什么需要：流式识别（[StreamingAsrSession]）要**逐块**吃原始 PCM，
+  /// 而旧的滑动窗口方案要攒成 wav 再离线转写。两者可以并存 ——
+  /// 旁路是"额外一条线"，不改变 wav 落盘与端点检测的原有行为。
+  ///
+  /// 回调在**采集 isolate 的事件循环**里被调用 ⇒ 里面**绝不能**做重活
+  /// （推给流式引擎即可，解码在引擎自己的 isolate 里）。
+  ///
+  /// 可变：读页在「开始录音」时挂上流式引擎的推流；暂停时置空。
+  void Function(Uint8List pcm16k)? onPcm;
 
   /// 采样率：与 sherpa 中文引擎固定约定（16kHz 单声道）。
   static const int sampleRate = 16000;
@@ -385,6 +448,9 @@ class ReadAlongRecorder {
   Stream<ReadAlongRecorderEvent> get events => _events.stream;
 
   final _wav = ReadAlongWavBuilder();
+
+  /// 连续收音模式用的**滑动窗口**环形缓冲（整课一直开着时）。
+  PcmRingBuffer? _ring;
   SilenceTracker? _tracker;
 
   /// 本次收音的兜底上限（_onChunk 用它判超时，_finish 用它写诊断日志）。
@@ -395,6 +461,9 @@ class ReadAlongRecorder {
   bool _running = false;
   bool _finishing = false;
 
+  /// 连续模式：静音**不**结束收音（整课一个流程，麦克风一直开着）。
+  bool _continuous = false;
+
   bool get isRecording => _running;
 
   /// 目前已检出过语音（边读边显示的门：没声时不空跑一次解码）。
@@ -404,17 +473,27 @@ class ReadAlongRecorder {
   /// 上层接到它就走「仅跟读不评分」降级，页面不死锁。
   ///
   /// [maxDurationMs] 兜底上限 = 该句音频时长 × 3 + 2000ms（方案 §三）。
-  Future<void> start({required int maxDurationMs}) async {
+  ///
+  /// [continuous] = 整课连续收音（2026-10-20 读页重构）：静音**不**结束录音，
+  /// 麦克风一直开着；识别改走 [snapshotWindowWav] 的滑动窗口。
+  /// [windowBytes] 是那个窗口的字节容量（16kHz×2byte = 32KB/秒）。
+  Future<void> start({
+    required int maxDurationMs,
+    bool continuous = false,
+    int windowBytes = 0,
+  }) async {
     if (_running) return;
     if (!await _mic.hasPermission()) {
       throw const ReadAlongMicPermissionDenied();
     }
     _finishing = false;
+    _continuous = continuous;
     _tracker = SilenceTracker(
       windowMs: silenceWindowMs,
       threshold: rmsThreshold,
       sampleRate: sampleRate,
     );
+    _ring = continuous && windowBytes > 0 ? PcmRingBuffer(windowBytes) : null;
     _maxDurationMs = maxDurationMs;
     _decimator = PcmDecimator(
       inputRate: inputSampleRate,
@@ -439,12 +518,16 @@ class ReadAlongRecorder {
     var readDone = false;
     for (final pcm16 in _decimator?.push(chunk) ?? const <Uint8List>[]) {
       _wav.add(pcm16);
+      _ring?.add(pcm16);
+      // 流式识别的旁路（2026-10-21）：同一块 16k PCM 也直接推给流式引擎。
+      // 放在这里 ⇒ 与端点检测、wav 落盘**完全解耦**，旧的离线链路不受影响。
+      onPcm?.call(pcm16);
       if (tracker.feed(pcm16)) readDone = true;
     }
     if (tracker.lastRms > 0 || readDone) {
       _events.add(RecorderLevel(tracker.lastRms));
     }
-    if (readDone) {
+    if (readDone && !_continuous) {
       _finish(timedOut: false);
     } else if (tracker.elapsedMs >= maxDurationMs) {
       _finish(timedOut: true);
@@ -553,6 +636,54 @@ class ReadAlongRecorder {
     if (!_running || _wav.pcmByteLength == 0) return null;
     final path = await _writeWav(prefix: 'listenloop_readalong_partial');
     return path;
+  }
+
+  /// **滑动窗口**快照：只取最近 [windowMs] 毫秒的音频（整课连续识别用）。
+  ///
+  /// 2026-10-20 读页重构 §四：整课一直收音时，每次识别只跑最近 6~8 秒，
+  /// 而不是整段累计音频 —— 识别量恒定，延迟不随时长增长。
+  Future<String?> snapshotWindowWav({required int windowMs}) async {
+    final ring = _ring;
+    if (!_running || ring == null || ring.length == 0) return null;
+    final dir = await _tempDir();
+    final path =
+        '${dir.path}${Platform.pathSeparator}listenloop_readalong_window_'
+        '${DateTime.now().microsecondsSinceEpoch}.wav';
+    final data = ring.toBytes();
+    File(path).writeAsBytesSync(
+      _wavBytes(data, sampleRate: sampleRate),
+      flush: true,
+    );
+    _lastWavPath = path;
+    return path;
+  }
+
+  /// 把裸 PCM 打包成 WAV 字节（头 + 数据）。
+  static Uint8List _wavBytes(Uint8List data, {required int sampleRate}) {
+    final byteRate = sampleRate * 1 * 2;
+    final out = Uint8List(44 + data.length);
+    final bd = ByteData.sublistView(out);
+    void ascii(int offset, String s) {
+      for (var i = 0; i < s.length; i++) {
+        bd.setUint8(offset + i, s.codeUnitAt(i));
+      }
+    }
+
+    ascii(0, 'RIFF');
+    bd.setUint32(4, 36 + data.length, Endian.little);
+    ascii(8, 'WAVE');
+    ascii(12, 'fmt ');
+    bd.setUint32(16, 16, Endian.little);
+    bd.setUint16(20, 1, Endian.little);
+    bd.setUint16(22, 1, Endian.little);
+    bd.setUint32(24, sampleRate, Endian.little);
+    bd.setUint32(28, byteRate, Endian.little);
+    bd.setUint16(32, 2, Endian.little);
+    bd.setUint16(34, 16, Endian.little);
+    ascii(36, 'data');
+    bd.setUint32(40, data.length, Endian.little);
+    out.setRange(44, 44 + data.length, data);
+    return out;
   }
 
   /// 识别完即删（方案 §九.6）。删除失败不抛——临时目录本就该被系统清。

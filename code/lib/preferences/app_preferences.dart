@@ -169,6 +169,31 @@ const String kDefaultYoutubeRelayBaseUrl = 'http://127.0.0.1:8793';
 const int kMinAsrThreads = 1;
 const int kMaxAsrThreads = 8;
 
+/// 读页口令的默认值（2026-10-21）。
+///
+/// 郭老师 2026-10-21：「把启动命令改为『开始朗读』」—— 从原来的
+/// 「开始朗读课文」缩成四个字：录音里说短口令更顺口，误触发概率也更低。
+const String kDefaultReadWakePhrase = '开始朗读';
+
+/// 设置页里可一键切换的**预设口令**（2026-10-21）。
+///
+/// 预设只是「懒得打字」时的快捷方式 —— 自定义输入框照旧保留，
+/// 任何口令都能用（口令判定走归一化文本匹配，不依赖模型词表）。
+const List<String> kReadWakePhrasePresetsZh = [
+  '开始朗读',
+  '开始阅读',
+  '我要朗读',
+  '开始跟读',
+];
+
+/// 英文课用的预设口令（设置页按界面语言切换）。
+const List<String> kReadWakePhrasePresetsEn = [
+  'Start reading',
+  "Let's read",
+  'Begin reading',
+  'Read with me',
+];
+
 /// ASR quality tier.
 /// 2026-10-01 端侧瘦身升级（全面切换轻量端侧手机模型）：
 /// - fast: 英文·手机主力（NeMo Parakeet 110M CTC，~131.6 MB）
@@ -299,6 +324,7 @@ class AppPreferences {
     this.libraryGridView = true,
     this.scrubberHaptics = true,
     this.lessonLoop = true,
+    this.readWakePhrase = kDefaultReadWakePhrase,
     this.pinyinScale = 1.0,
     this.configVersion = kCurrentConfigVersion,
   });
@@ -366,6 +392,13 @@ class AppPreferences {
   /// 郭老师 request: 课文播完不要自动切到下一课).
   final bool lessonLoop;
 
+  /// 读页的**口令**（唤醒词）—— 2026-10-21 郭老师：「录制一个口令（口令可由
+  /// 用户自定义，比如"开始朗读课文"）。当用户说出自定义口令，且系统准确识别
+  /// 到之后，才会触发正式测试」。
+  ///
+  /// 空串 = 不等口令（点开就直接判读）。
+  final String readWakePhrase;
+
   /// Schema version of the persisted configuration — see [kCurrentConfigVersion].
   final int configVersion;
 
@@ -400,6 +433,7 @@ class AppPreferences {
     bool? libraryGridView,
     bool? scrubberHaptics,
     bool? lessonLoop,
+    String? readWakePhrase,
     double? pinyinScale,
     int? configVersion,
   }) => AppPreferences(
@@ -422,6 +456,7 @@ class AppPreferences {
     libraryGridView: libraryGridView ?? this.libraryGridView,
     scrubberHaptics: scrubberHaptics ?? this.scrubberHaptics,
     lessonLoop: lessonLoop ?? this.lessonLoop,
+    readWakePhrase: readWakePhrase ?? this.readWakePhrase,
     configVersion: configVersion ?? this.configVersion,
   );
 }
@@ -488,6 +523,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
   static const _keyLibraryGridView = 'listenloop:pref.libraryGridView';
   static const _keyScrubberHaptics = 'listenloop:pref.scrubberHaptics';
   static const _keyLessonLoop = 'listenloop:pref.lessonLoop';
+  static const _keyReadWakePhrase = 'listenloop:pref.readWakePhrase';
   static const _keyPinyinScale = 'listenloop:pref.pinyinScale';
   static const _keyConfigVersion = 'listenloop:pref.configVersion';
 
@@ -610,6 +646,8 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
       libraryGridView: _readBool(sp, _keyLibraryGridView) ?? true,
       scrubberHaptics: _readBool(sp, _keyScrubberHaptics) ?? true,
       lessonLoop: _readBool(sp, _keyLessonLoop) ?? true,
+      readWakePhrase: _readString(sp, _keyReadWakePhrase) ??
+          AppPreferences.defaults.readWakePhrase,
       pinyinScale: _readDouble(sp, _keyPinyinScale) ?? 1.0,
       configVersion: kCurrentConfigVersion,
     );
@@ -640,6 +678,7 @@ class SharedPrefsAppPreferencesStore implements AppPreferencesStore {
     await sp.setBool(_scoped(_keyLibraryGridView), prefs.libraryGridView);
     await sp.setBool(_scoped(_keyScrubberHaptics), prefs.scrubberHaptics);
     await sp.setBool(_scoped(_keyLessonLoop), prefs.lessonLoop);
+    await sp.setString(_scoped(_keyReadWakePhrase), prefs.readWakePhrase);
     await sp.setDouble(_scoped(_keyPinyinScale), prefs.pinyinScale);
     await sp.setInt(_keyConfigVersion, prefs.configVersion);
   }
@@ -682,6 +721,7 @@ class PreferencesController extends ChangeNotifier {
     bool? libraryGridView,
     bool? scrubberHaptics,
     bool? lessonLoop,
+    String? readWakePhrase,
     double? pinyinScale,
   }) async {
     _prefs = _prefs.copyWith(
@@ -704,6 +744,7 @@ class PreferencesController extends ChangeNotifier {
       libraryGridView: libraryGridView,
       scrubberHaptics: scrubberHaptics,
       lessonLoop: lessonLoop,
+      readWakePhrase: readWakePhrase,
     );
     notifyListeners();
     try {

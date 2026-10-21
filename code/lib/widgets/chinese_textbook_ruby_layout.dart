@@ -33,6 +33,7 @@ class ChineseTextbookRubyLayout extends StatelessWidget {
     this.wordSpacing = 6.0,
     this.lineSpacing = 16.0,
     this.pinyinRatio = 0.52,
+    this.pinyinScale = 1.0,
     this.activeCharIndex,
     this.charStatuses,
     this.highlightColor,
@@ -65,6 +66,12 @@ class ChineseTextbookRubyLayout extends StatelessWidget {
   /// 拼音相对于汉字的字号比例（默认 0.52，即 52%）
   final double pinyinRatio;
 
+  /// 拼音大小的**独立**倍率（2026-10-20 郭老师：字体控制再加一个拼音大小）。
+  ///
+  /// 1.0 = 跟随上面的比例；0.8 = 拼音小一点（低年级刚开始学拼）；1.25 = 拼音
+  /// 大一点（看得清声调）。它只改拼音，不动汉字。
+  final double pinyinScale;
+
   /// 随音逐字高亮：当前读到的字符索引（>= 该索引的为未读，< 该索引的为已读/高亮）。
   /// 为 null 时表示常规排版渲染。
   final int? activeCharIndex;
@@ -96,7 +103,9 @@ class ChineseTextbookRubyLayout extends StatelessWidget {
     final scaleRatio = (effectiveCharSize / 28.0).clamp(0.2, 2.0);
     // 拼音基准字号默认提升为汉字的 52%（从 44% 优化至 52%，解决声调偏小、看不太清问题），真实等比缩放
     final effectivePinyinRatio = pinyinRatio.clamp(0.35, 0.70);
-    final basePinyinSize = (effectiveCharSize * effectivePinyinRatio).clamp(3.5, 36.0);
+    final basePinyinSize =
+        (effectiveCharSize * effectivePinyinRatio * pinyinScale.clamp(0.6, 1.6))
+            .clamp(3.5, 36.0);
 
     // 2026-10-20 郭老师（听页「字挨字、没有呼吸感」的真正病根）：
     //

@@ -194,7 +194,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 leading: Icon(
                   profile.hasPin ? Icons.lock_open_outlined : Icons.lock_outline,
                 ),
-                title: Text(profile.hasPin ? '取消密码' : '设置密码'),
+                // 密码**可选**：没设密码就直接进 App。这里写清楚"可取消"，
+                // 免得以为设了就撤不掉。
+                title: Text(profile.hasPin ? '取消密码' : '设置密码（可选）'),
+                subtitle: Text(
+                  profile.hasPin ? '取消后打开 App 不用输密码' : '设了之后打开 App 需要 4 位密码',
+                ),
                 onTap: () => Navigator.of(sheetContext).pop('pin'),
               ),
               ListTile(

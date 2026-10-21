@@ -381,8 +381,11 @@ class _TypographyDetailPage extends StatelessWidget {
             children: [
               _TextSizeSection(
                 selected: prefs.textScale,
+                pinyinScale: prefs.pinyinScale,
                 zh: zh,
                 onChange: (scale) => controller.update(textScale: scale),
+                onPinyinChange: (scale) =>
+                    controller.update(pinyinScale: scale),
               ),
               const LLHairline(),
               Padding(
@@ -536,9 +539,202 @@ class _ReadAlongDetailPage extends StatelessWidget {
                   ],
                 ),
               ),
+              const LLHairline(),
+              // 2026-10-21：读页口令（可自定义）。
+              // 「说出口令才开始正式判读」——郭老师要的。
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      zh ? '读页口令' : 'Read-along wake phrase',
+                      style: LLText.rowLabel.copyWith(color: ll.textPrimary),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      zh
+                          ? '说出这句才开始正式判读；留空 = 点开就直接判读'
+                          : 'Say this to start judging; empty = judge immediately',
+                      style: LLText.itemSummary.copyWith(color: ll.textTertiary),
+                    ),
+                    const SizedBox(height: 8),
+                    // 2026-10-21 郭老师：「能在设置中切换启动命令」⇒ 预设一键切换；
+                    // 自定义输入框照旧（口令判定走归一化文本匹配，任意口令都能用）。
+                    _WakePhrasePresets(
+                      value: prefs.readWakePhrase,
+                      presets: zh
+                          ? kReadWakePhrasePresetsZh
+                          : kReadWakePhrasePresetsEn,
+                      offLabel: zh ? '不用口令' : 'No phrase',
+                      onSelected: (phrase) =>
+                          controller.update(readWakePhrase: phrase),
+                    ),
+                    const SizedBox(height: 8),
+                    _WakePhraseField(
+                      value: prefs.readWakePhrase,
+                      hint: zh ? kDefaultReadWakePhrase : 'Start reading',
+                      onChanged: (value) =>
+                          controller.update(readWakePhrase: value),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 口令预设（一键切换）—— 2026-10-21 郭老师：「把启动命令改为『开始朗读』，
+/// 同时能在设置中切换启动命令的自定义词语」。
+///
+/// 预设只是快捷方式：点一下就把输入框填成它；想写别的就自己打字，
+/// 判定逻辑（归一化文本匹配）不挑口令。
+class _WakePhrasePresets extends StatelessWidget {
+  const _WakePhrasePresets({
+    required this.value,
+    required this.presets,
+    required this.offLabel,
+    required this.onSelected,
+  });
+
+  final String value;
+  final List<String> presets;
+  final String offLabel;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final phrase in presets)
+          _WakePhrasePill(
+            label: phrase,
+            selected: phrase == value,
+            onTap: () => onSelected(phrase),
+          ),
+        // 留空 = 不等口令（点开就直接判读），也给一个显式入口。
+        _WakePhrasePill(
+          label: offLabel,
+          selected: value.trim().isEmpty,
+          onTap: () => onSelected(''),
+        ),
+      ],
+    );
+  }
+}
+
+/// 预设口令的小药丸。
+class _WakePhrasePill extends StatelessWidget {
+  const _WakePhrasePill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ll = context.ll;
+    final shape = context.llShape;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? ll.controlThumb : ll.surface,
+          borderRadius: BorderRadius.circular(shape.chip),
+          border: Border.all(
+            color: selected ? ll.controlThumbBorder : ll.divider,
+          ),
+        ),
+        child: Text(
+          label,
+          style: LLText.controlLabel.copyWith(
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            color: selected ? ll.textPrimary : ll.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 口令输入框（2026-10-21）。
+class _WakePhraseField extends StatefulWidget {
+  const _WakePhraseField({
+    required this.value,
+    required this.hint,
+    required this.onChanged,
+  });
+
+  final String value;
+  final String hint;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_WakePhraseField> createState() => _WakePhraseFieldState();
+}
+
+class _WakePhraseFieldState extends State<_WakePhraseField> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.value);
+
+  @override
+  void didUpdateWidget(_WakePhraseField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != _controller.text) {
+      _controller.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ll = context.ll;
+    return TextField(
+      key: const Key('wake-phrase-field'),
+      controller: _controller,
+      onChanged: widget.onChanged,
+      style: TextStyle(fontSize: 14, color: ll.textPrimary),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: widget.hint,
+        hintStyle: TextStyle(fontSize: 14, color: ll.textTertiary),
+        filled: true,
+        fillColor: ll.surface,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: ll.divider),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: ll.divider),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: ll.textPrimary.withValues(alpha: 0.4)),
+        ),
       ),
     );
   }
@@ -1086,7 +1282,7 @@ class _SettingsDetailPage extends StatelessWidget {
 }
 
 
-/// 字号区（2026-10-20 郭老师重做，两条要求合并实现）：
+/// 字号区（2026-10-20 郭老师重做，三条要求合并实现）：
 ///
 /// ① **不是按档位加，而是直接挑**。原来是 `A− 100% A+`——那是"加减法"，
 ///    用户要的是"挑一个"。现在给 3 枚字号（小/中/大），点一下就落到那个
@@ -1094,24 +1290,41 @@ class _SettingsDetailPage extends StatelessWidget {
 /// ② **长按可连续调整**。长按整行就地展开一条滑条，按住拖着实时变，
 ///    和调倍速一模一样（长按出轴 → 按住拖 → 松手保留），不用松手再重来。
 ///    滑条与档位双向同步：拖到哪一档，最近的那枚就高亮。
+/// ③ **拼音大小单独一档**（2026-10-20 郭老师：「字体控制，再加一个拼音字体
+///    的大小控制」）。汉字多大、拼音多大，**两件事各管各的**：低年级刚开始
+///    学拼就把拼音调小些，认字阶段把拼音调大些看清单声调。
 class _TextSizeSection extends StatefulWidget {
   const _TextSizeSection({
     required this.selected,
+    required this.pinyinScale,
     required this.zh,
     required this.onChange,
+    required this.onPinyinChange,
   });
 
   final double selected;
+
+  /// 拼音大小倍率（1.0 = 跟随默认比例）。
+  final double pinyinScale;
+
   final bool zh;
   final ValueChanged<double> onChange;
+  final ValueChanged<double> onPinyinChange;
 
   @override
   State<_TextSizeSection> createState() => _TextSizeSectionState();
 }
 
 class _TextSizeSectionState extends State<_TextSizeSection> {
-  /// 滑条是否展开（长按整行才展开，不占常态空间）。
+  /// 汉字滑条是否展开（长按整行才展开，不占常态空间）。
   bool _tuning = false;
+
+  /// 拼音滑条是否展开。
+  bool _tuningPinyin = false;
+
+  /// 拼音的三档倍率（小 / 中 / 大）。
+  static const List<double> _pinyinScales = [0.8, 1.0, 1.25];
+  static const List<String> _pinyinLabels = ['小', '中', '大'];
 
   @override
   Widget build(BuildContext context) {
@@ -1226,7 +1439,170 @@ class _TextSizeSectionState extends State<_TextSizeSection> {
             ],
           ),
         ],
+        const SizedBox(height: 14),
+
+        // ── 拼音大小（独立于汉字）────────────────────────────────
+        InkWell(
+          onLongPress: () {
+            if (!_tuningPinyin) setState(() => _tuningPinyin = true);
+          },
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.zh ? '拼音大小' : 'Pinyin size',
+                        style: LLText.rowLabel.copyWith(color: ll.textPrimary),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        widget.zh
+                            ? '与汉字大小互不影响'
+                            : 'Independent of text size',
+                        style: LLText.itemSummary.copyWith(color: ll.textTertiary),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '${(widget.pinyinScale * 100).round()}%',
+                  style: LLText.counter.copyWith(color: ll.textPrimary),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            for (var i = 0; i < _pinyinScales.length; i++)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _PinyinChip(
+                    label: _pinyinLabels[i],
+                    scale: _pinyinScales[i],
+                    selected: (widget.pinyinScale - _pinyinScales[i]).abs() < 0.02,
+                    onTap: () => widget.onPinyinChange(_pinyinScales[i]),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        if (_tuningPinyin) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                '0.6×',
+                style: LLText.caption.copyWith(color: ll.textTertiary),
+              ),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: ll.textPrimary,
+                    inactiveTrackColor: ll.divider,
+                    thumbColor: ll.textPrimary,
+                    overlayColor: ll.textPrimary.withValues(alpha: 0.12),
+                    trackHeight: 3,
+                  ),
+                  child: Slider(
+                    min: 0.6,
+                    max: 1.6,
+                    divisions: 20,
+                    label: '${(widget.pinyinScale * 100).round()}%',
+                    value: widget.pinyinScale.clamp(0.6, 1.6),
+                    onChanged: (value) => widget.onPinyinChange(value),
+                  ),
+                ),
+              ),
+              Text(
+                '1.6×',
+                style: LLText.caption.copyWith(color: ll.textTertiary),
+              ),
+              IconButton(
+                tooltip: widget.zh ? '收起微调' : 'Done',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  Icons.check_rounded,
+                  size: 18,
+                  color: ll.textSecondary,
+                ),
+                onPressed: () => setState(() => _tuningPinyin = false),
+              ),
+            ],
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// 一枚拼音档位：样例拼音（按档位大小）+ 档位名。
+class _PinyinChip extends StatelessWidget {
+  const _PinyinChip({
+    required this.label,
+    required this.scale,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final double scale;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ll = context.ll;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? ll.textPrimary.withValues(alpha: 0.08)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected
+                ? ll.textPrimary.withValues(alpha: 0.35)
+                : ll.divider,
+            width: selected ? 1.2 : 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'hǎo',
+              style: TextStyle(
+                fontSize: 8 + scale * 6,
+                height: 1.0,
+                fontWeight: FontWeight.w600,
+                color: selected ? ll.textPrimary : ll.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? ll.textPrimary : ll.textTertiary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1489,6 +1865,7 @@ class _PreviewCanvasState extends State<_PreviewCanvas> {
                         fontSize: 19 * prefs.textScale,
                       ),
                       chineseFontFamily: prefs.learningChineseFont.family,
+                      pinyinScale: prefs.pinyinScale,
                       textAlign: TextAlign.left,
                       wordSpacing: 5.0,
                       lineSpacing: 6.0,

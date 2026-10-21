@@ -6,6 +6,22 @@ import 'chinese_word_segmenter.dart';
 import 'read_along_session.dart';
 import 'reading_alignment.dart';
 
+/// 整课朗读的**朗读模式**（2026-10-21 郭老师定的两种）。
+///
+/// 两种模式**逐字反馈完全一样**（都是边读边一个一个变色），
+/// 区别只在**判定边界**：
+///  · [sentence]：**以句为单位**。孩子把这一句读好，才进下一句。
+///    读完一句就结算这一句（错词当场可练），反馈快。
+///  · [fullText]：**全文为单位**。整篇一口气读完，最后统一处理
+///    （错词延后到整课结束再汇总）。适合已经读熟、要连贯背一遍的孩子。
+enum ReadingMode {
+  /// 以句为单位：一句读好再下一句。
+  sentence,
+
+  /// 全文：读完整篇再统一处理。
+  fullText,
+}
+
 /// 整课朗读的一个**音节**（= 一个汉字）。
 ///
 /// 2026-10-20 郭老师：「以一篇课文为一个流程」——所以索引是**整篇**的，
@@ -128,8 +144,10 @@ class ContinuousReadingSession extends ChangeNotifier {
   ContinuousReadingSession({
     required List<Sentence> sentences,
     ReadingAligner aligner = const ReadingAligner(),
+    ReadingMode mode = ReadingMode.sentence,
   })  : _tokens = buildTokens(sentences),
-        _aligner = aligner {
+        _aligner = aligner,
+        _mode = mode {
     _tokenStates = List<ReadingTokenStatus>.filled(
       _tokens.length,
       ReadingTokenStatus.pending,
@@ -139,6 +157,25 @@ class ContinuousReadingSession extends ChangeNotifier {
 
   final ReadingAligner _aligner;
   final List<ReadingToken> _tokens;
+
+  /// 朗读模式（句为单位 / 全文）。
+  ReadingMode _mode;
+  ReadingMode get mode => _mode;
+
+  /// 切换朗读模式。切换会把判定游标重置到当前句开头（状态也重置为 pending）。
+  void setMode(ReadingMode mode) {
+    if (_mode == mode) return;
+    _mode = mode;
+    _committedCursor = 0;
+    _provisionalCursor = 0;
+    _carry = const [];
+    _tokenStates = List<ReadingTokenStatus>.filled(
+      _tokens.length,
+      ReadingTokenStatus.pending,
+    );
+    _tokenHeard = List<String?>.filled(_tokens.length, null);
+    notifyListeners();
+  }
 
   late List<ReadingTokenStatus> _tokenStates;
   late List<String?> _tokenHeard;
@@ -265,22 +302,27 @@ class ContinuousReadingSession extends ChangeNotifier {
   /// 2026-10-20 郭老师：「肯定是一句一句地来，就按照课文上的标点符号，就是
   /// 逗号跟句号，来划分每一个句子就行了，这样规则简单一些，好弄」
   ///
-  /// 所以对齐的**单位是"一句"**（句子按课文的标点分），不是跨句乱对：
-  /// 　· 期望序列 = 当前句还没读到的那些音节；
-  /// 　· 识别多了的音节（孩子提前读到下一句）**留给下一句**（carry）；
-  /// 　· 这一句读通了（连续命中到句尾）→ 换下一句。
-  void applyRecognition({
+  /// 2026-10-21（逐句判定的正确逻辑，郭老师：「这一条句子读准了，再下一个
+  /// 句子呀，全绿了才下一个」）：
+  ///   · **逐句模式**：这一句**全绿**（每个字都对上）才推进到下一句；
+  ///     没读准就**停在这一句**，不往下跳。
+  ///   · **全文模式**：整篇连续推进（读到哪标到哪）。
+  ///
+  /// 返回值：当前句是否**刚刚全绿完成**（逐句模式专用 —— 上层据此**重置
+  /// 流式识别**，让下一句从干净的音频重新开始）。
+  bool applyRecognition({
     required List<String> syllables,
     required String text,
+    bool live = false,
   }) {
-    if (_tokens.isEmpty) return;
+    if (_tokens.isEmpty) return false;
     _liveTranscript = text;
 
     if (_committedCursor >= _tokens.length) {
       _finished = true;
       _hint = '这一课读完啦！读得真棒 🎉';
       notifyListeners();
-      return;
+      return false;
     }
 
     // 当前句的范围（句子按课文标点分 —— 见 _tokens 的 sentenceIndex）。
@@ -291,8 +333,38 @@ class ContinuousReadingSession extends ChangeNotifier {
       sentenceEnd++;
     }
 
+    // 对齐的**基准起点**。
+    //
+    // ⚠️ 流式（live）与批式的基准不一样，这是 2026-10-21 踩出来的坑：
+    //   · 批式：一次喂「这一句剩下的部分」⇒ 基准 = _committedCursor（句中）。
+    //   · 流式：每次喂的是**从这一句开头起的累积文本**（'池' → '池塘' →
+    //     '池塘里'）⇒ 基准必须是**句首**，否则第二次对齐时 expected 已经被
+    //     cursor 截短，识别的累积文本却仍从句首开始 ⇒ 整体错位
+    //     （「塘」被配到「chi」上，判成读错）。
+    var base = _committedCursor;
+    if (live) {
+      if (_mode == ReadingMode.fullText) {
+        base = 0; // 全文模式：累积文本对应全篇开头。
+      } else {
+        base = _committedCursor;
+        while (base > 0 && _tokens[base - 1].sentenceIndex == sentenceIndex) {
+          base--;
+        }
+      }
+    }
+
+    // 期望范围：
+    //  · 句为单位 ⇒ 只对齐**当前句**剩下的音节（读完这句再进下一句）。
+    //  · 全文     ⇒ 对齐**整篇剩下的**音节（读完整篇再统一处理）。
+    final int alignEnd;
+    if (_mode == ReadingMode.fullText) {
+      alignEnd = _tokens.length;
+    } else {
+      alignEnd = sentenceEnd;
+    }
+
     final expected = [
-      for (var i = _committedCursor; i < sentenceEnd; i++) _tokens[i].toneless,
+      for (var i = base; i < alignEnd; i++) _tokens[i].toneless,
     ];
     final heard = [
       ..._carry,
@@ -304,17 +376,33 @@ class ContinuousReadingSession extends ChangeNotifier {
     final result = _aligner.align(expected: expected, recognized: heard);
 
     // 写回状态：只动当前句（已确认的前缀不改 —— 红绿不闪）。
-    var contiguous = _committedCursor;
+    var contiguous = base;
     for (var k = 0; k < result.statuses.length; k++) {
-      final idx = _committedCursor + k;
+      final idx = base + k;
       if (idx >= _tokens.length) break;
-      final status = result.statuses[k];
+      var status = result.statuses[k];
+
+      // ⚠️ 流式（live）：尾部那些**还没读到**的字不能判「漏读」。
+      //
+      // 批式识别是「读完一句再判」，尾部判 missed 是对的（真的漏了）。
+      // 流式下只识别到句中，尾部只是**还没读**——判 missed 会让满屏红字。
+      // ⇒ 用对齐器的 frontier（识别覆盖到的位置）把尾部还原成 pending。
+      if (live && k >= result.frontier) {
+        status = ReadingTokenStatus.pending;
+      }
+
       if (idx < _committedCursor) continue;
       _tokenStates[idx] = status;
-      _tokenHeard[idx] = result.heard[k];
-      if (status == ReadingTokenStatus.matched ||
-          status == ReadingTokenStatus.substituted) {
-        if (idx == contiguous) contiguous = idx + 1;
+      if (status != ReadingTokenStatus.pending) {
+        _tokenHeard[idx] = result.heard[k];
+      }
+      // ⚠️ 只有**完全对上**（matched）才推进游标。
+      //
+      // substituted = 读成了别的字 ⇒ 游标**停在这儿**（那个字标红，等重读），
+      // 不能推过去 —— 推过去就等于「读错了也往下走」，正是郭老师说的
+      // 「这一句还没读准，它就一直跳」。
+      if (status == ReadingTokenStatus.matched && idx == contiguous) {
+        contiguous = idx + 1;
       }
     }
 
@@ -330,14 +418,56 @@ class ContinuousReadingSession extends ChangeNotifier {
     }
 
     // committed：这一句里**连续**确认到的最远位置（只向前推进）。
-    if (contiguous > _committedCursor) {
-      _committedCursor = contiguous;
-      if (contiguous > _provisionalCursor) _provisionalCursor = contiguous;
+    //
+    // ⚠️ 2026-10-21 逐句判定的关键（郭老师：「这一条句子读准了，再下一个句子呀，
+    // 全绿了才下一个」）：
+    //
+    // 逐句 + 流式（live）模式下，**换句只在整句全绿时发生**。
+    // 否则会出现「这一句还没读完，它就一直跳下一句」—— 因为孩子读了一部分，
+    // 累积文本里的音节被 NW 对齐到了句尾，contiguous 就冲过去了。
+    //
+    //   · committed（句内位置）⇒ 仍连续推进，供**逐字高亮**用。
+    //   · 换句                ⇒ 必须整句 matched 且无一字 substituted。
+    final bool sentenceMode = _mode == ReadingMode.sentence;
+    final int sentenceLen = sentenceEnd - base;
+    final bool allGreen = sentenceLen > 0 &&
+        result.matchedCount >= sentenceLen &&
+        result.substitutedCount == 0;
+
+    if (sentenceMode && live) {
+      // 句内位置照旧推进（逐字高亮要）。
+      if (contiguous > _committedCursor) {
+        _committedCursor = contiguous;
+        if (contiguous > _provisionalCursor) _provisionalCursor = contiguous;
+      }
+      // 但**换句**只在全绿时。
+      if (allGreen) {
+        _committedCursor = sentenceEnd;
+        if (sentenceEnd > _provisionalCursor) _provisionalCursor = sentenceEnd;
+      }
+    } else {
+      if (contiguous > _committedCursor) {
+        _committedCursor = contiguous;
+        if (contiguous > _provisionalCursor) _provisionalCursor = contiguous;
+      }
     }
 
     if (_committedCursor >= _tokens.length) {
       _finished = true;
       _hint = '这一课读完啦！读得真棒 🎉';
+    } else if (live) {
+      // 流式下 missedCount 里混着「还没读到」的字 ⇒ 不能据此说"没听清"。
+      // 只在**已覆盖区**里真漏了字才提示。
+      final coveredMissed = result.missedCount -
+          (result.statuses.length - result.frontier).clamp(0, result.statuses.length);
+      if (coveredMissed > 0 && result.matchedCount > 0) {
+        _hint = '有几个字还没听清，继续读就好';
+      } else if (sentenceMode && !allGreen && result.matchedCount > 0) {
+        // 逐句模式：这一句还没全绿 ⇒ 明确告诉孩子"这句还没读完"。
+        _hint = '这一句还没读完，读准了才进下一句';
+      } else {
+        _hint = null;
+      }
     } else if (result.missedCount > 0 && result.matchedCount > 0) {
       _hint = '有几个字还没听清，继续读就好';
     } else {
@@ -345,6 +475,10 @@ class ContinuousReadingSession extends ChangeNotifier {
     }
 
     notifyListeners();
+
+    // 逐句模式：这一句刚全绿 ⇒ 通知上层**重置流式识别**（下一句从干净音频开始）。
+    final bool sentenceCompleted = sentenceMode && live && allGreen;
+    return sentenceCompleted;
   }
 
   /// 某一刻的"我在读第几个字"（供页面高亮用）。

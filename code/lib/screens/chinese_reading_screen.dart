@@ -1,16 +1,22 @@
 import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../creation/sherpa_onnx_asr_engine.dart';
+import '../creation/streaming_asr_engine.dart';
 import '../models/lesson.dart';
 import '../models/sentence.dart';
 import '../player/sentence_player_controller.dart';
 import '../preferences/app_preferences.dart';
 import '../theme/listenloop_theme.dart';
 import '../training/continuous_reading_session.dart';
+import '../training/live_reading_controller.dart';
 import '../utils/chinese_pinyin.dart';
 import '../widgets/lesson_reading_document.dart';
 import '../widgets/live_reading_dock.dart';
+import '../widgets/live_record_button.dart';
 import '../training/read_along_recorder.dart';
 import '../training/read_along_session.dart';
 import '../widgets/ll_page.dart';
@@ -33,6 +39,7 @@ class ChineseReadingScreen extends StatefulWidget {
     this.session,
     this.recorder,
     this.onSelectSentence,
+    this.alternateSentences,
   });
 
   final Lesson lesson;
@@ -41,6 +48,9 @@ class ChineseReadingScreen extends StatefulWidget {
   final ReadAlongSession? session;
   final ReadAlongRecorder? recorder;
   final ValueChanged<int>? onSelectSentence;
+
+  /// 熟读档的句子（长意群）。给了才能切「初读 / 熟读」。
+  final List<Sentence>? alternateSentences;
 
   @override
   State<ChineseReadingScreen> createState() => _ChineseReadingScreenState();
@@ -71,9 +81,29 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
   // 　· 窗口容量 8 秒（16kHz × 2byte = 32KB/秒 ⇒ 256KB）
   // 　· 每次识别最近 7 秒（留 1 秒重叠，给对齐器接缝）
   // 　· 识别节奏 800ms 一次（镜像建议 700~1000ms）
+  //
+  // ⚠️ 2026-10-21：这三条是**降级路径**的参数（没有流式模型时走它）。
+  //    首选路径是**流式识别**（[LiveReadingController]）：边说边出字，
+  //    不用每 800ms 把 7 秒音频从头重转写一遍。
   static const int _captureWindowMs = 7000;
   static const int _captureWindowBytes = 8 * 32000;
   static const Duration _captureInterval = Duration(milliseconds: 800);
+
+  // ── 2026-10-21：实时朗读（流式 + 口令 + 逐字上色）────────────────
+  //
+  // 用户需求原文：
+  //   「能不能做到像语音识别输入一样实时识别了」
+  //   「把开始识别和暂停识别浓缩为一个圆形的录音按钮，集合在底部中间的
+  //     "听"和"读"上面」
+  //   「给这个按钮增加实时识别功能……录制一个口令（口令可由用户自定义，
+  //     比如"开始朗读课文"）。当用户说出自定义口令，且系统准确识别到之后，
+  //     才会触发正式测试」
+  //   「一个一个字地来识别并做这个动画」
+  LiveReadingController? _liveController;
+  bool _useStreaming = false;   // 流式可用？不可用则降级到滑动窗口
+  /// 口令（可由用户自定义）。用户能在设置里改，所以不是 final。
+  // ignore: prefer_final_fields
+  String _wakePhrase = kDefaultReadWakePhrase;
 
   /// 当前是不是"整课连续收音"模式（连续模式下到点重开，不做句级判分）。
   bool _continuousCapture = false;
@@ -106,7 +136,22 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
   //
   // 它是"整篇课文一个流程"的数据底座：整篇 token 索引、跨句对齐、
   // committed/provisional 双游标都在里面。页面只订阅它的快照。
-  late final ContinuousReadingSession _readingSession;
+  //
+  // ⚠️ 2026-10-21：切「初读 / 熟读」会换一整套句子（切分粒度不同）⇒
+  //    token 索引全变 ⇒ 会话必须**重建**（不能是 final）。
+  late ContinuousReadingSession _readingSession;
+
+  /// 当前生效的句子列表（初读 = 短句；熟读 = 长意群）。
+  late List<Sentence> _activeSentences;
+
+  /// 熟读档的句子（长意群）；null = 这课没有熟读切分。
+  List<Sentence>? _alternateSentences;
+
+  /// 当前是不是熟读档。
+  bool _isAlternateMode = false;
+
+  /// 朗读模式（句为单位 / 全文）。
+  ReadingMode _readingMode = ReadingMode.sentence;
 
   /// 是否已经按"上次读到哪"定位过（控制器异步恢复句号，要等它报出来）。
   bool _sessionSeeked = false;
@@ -119,20 +164,28 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
       duration: const Duration(milliseconds: 900),
     );
 
-    _readingSession = ContinuousReadingSession(sentences: widget.sentences);
+    _activeSentences = widget.sentences;
+    _alternateSentences = widget.alternateSentences;
+    _readingSession = ContinuousReadingSession(
+      sentences: _activeSentences,
+      mode: _readingMode,
+    );
     // 关键：页面必须**订阅**整课会话 —— 识别结果、字词状态、自动定位都从它来。
     // 不订阅的话，底栏出字了课文却不会变色，定位也不会滚。
     _readingSession.addListener(_onSessionChanged);
     _initEngine();
     widget.controller.addListener(_onControllerChanged);
-    // 2026-10-20 读页重构：「不需要手动，都是自动识别」。
-    // 进这一页就自动开麦（系统麦克风权限弹窗照常；被拒了就说"无法实时
-    // 反馈"，绝不假装在识别）。
+    // 2026-10-21：**不再自动开麦**。
+    //
+    // 郭老师：「我竟然不能自己手动点击开始识别和暂停识别。」
+    // 以前是「进这一页就自动开麦」⇒ 麦克风一直开着（整课 10 分钟），
+    // 录进来大量环境噪音与扬声器回授，还没法暂停。
+    // ⇒ 现在由**底部的圆形录音按钮**控制（开始 / 暂停 合一），
+    //   而且点开之后先**等口令**（默认「开始朗读课文」），说出口令才正式判读。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 起始位置：控制器的句号是**异步恢复**的，首帧之后才知道孩子上次读到
       // 哪一句，这时再把整篇课文定位过去。
       _syncSessionPosition();
-      if (mounted) _onStartRecording();
     });
   }
 
@@ -145,8 +198,58 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
     _readingSession.seekToSentence(idx);
   }
 
-  void _initEngine() {
-    _session = widget.session ??
+  /// 切换**朗读模式**：句为单位 / 全文（2026-10-21 郭老师定的两种）。
+  ///
+  /// 两种模式**逐字反馈完全一样**（都是边读边一个一个变色），
+  /// 区别只在判定边界：
+  ///   · 句为单位：一句读好才进下一句，读完一句就结算这一句（反馈快）
+  ///   · 全文    ：整篇一口气读完，最后统一处理
+  void _setReadingMode(ReadingMode mode) {
+    if (_readingMode == mode) return;
+    setState(() {
+      _readingMode = mode;
+    });
+    _readingSession.setMode(mode);
+  }
+
+  /// 切换**切分档**：初读（短句）/ 熟读（长意群）。
+  ///
+  /// 初读 = 呼吸节拍，短句、要求过关；熟读 = 长意群、照给分但不卡进度。
+  /// 切档会换一整套句子 ⇒ token 索引全变 ⇒ 整课会话**重建**。
+  void _toggleSegmentationMode() {
+    final alt = _alternateSentences;
+    if (alt == null || alt.isEmpty) return;
+    final toAlternate = !_isAlternateMode;
+    final target = toAlternate ? alt : widget.sentences;
+
+    _readingSession.removeListener(_onSessionChanged);
+    _readingSession.dispose();
+    setState(() {
+      _isAlternateMode = toAlternate;
+      _activeSentences = target;
+      _readingSession = ContinuousReadingSession(
+        sentences: target,
+        mode: _readingMode,
+      );
+    });
+    _readingSession.addListener(_onSessionChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 口令从偏好读（用户可自定义；空串 = 不等口令，点开直接判读）。
+    //
+    // ⚠️ 必须在 didChangeDependencies 里读，**不能**在 initState 里 ——
+    //    initState 时 inherited widget（PreferencesScope）还没挂上，
+    //    `dependOnInheritedWidgetOfExactType` 会抛断言（真机红屏实证）。
+    final phrase = PreferencesScope.maybeOf(context).readWakePhrase;
+    if (phrase != _wakePhrase) {
+      _wakePhrase = phrase;
+    }
+  }
+
+  void _initEngine() {    _session = widget.session ??
         ReadAlongSession(
           engine: SherpaOnnxAsrEngine(
             modelDirResolver: defaultAsrModelDir,
@@ -422,12 +525,26 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
     });
   }
 
-  /// 点击开始跟读（全句）
+  /// 点圆形录音按钮（**开始 / 暂停 合一**）。
+  ///
+  /// 2026-10-21 郭老师：「把开始识别和暂停识别浓缩为一个圆形的录音按钮」
   Future<void> _onStartRecording() async {
     if (_isRecording) {
-      // 提前结束录音并送评
+      // ── 暂停 ────────────────────────────────────────────────
       _haltLive();
+      _recorder.onPcm = null; // 断掉流式推流
+      final live = _liveController;
+      if (live != null) {
+        live.removeListener(_onLiveControllerChanged);
+        await live.stop();
+      }
+      _liveController = null;
+      _useStreaming = false;
       await _recorder.finishNow();
+      setState(() {
+        _isRecording = false;
+        _statusHint = '已暂停，点一下继续';
+      });
       return;
     }
 
@@ -459,8 +576,41 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
         continuous: true,
         windowBytes: _captureWindowBytes,
       );
+      // 2026-10-21：**首选流式识别**（边说边出字 + 口令触发）。
+      // 没有流式模型（或打开失败）⇒ 降级到旧的滑动窗口离线转写。
+      _liveController = LiveReadingController(
+        session: _readingSession,
+        streamingEngine: SherpaOnnxStreamingAsrEngine(
+          modelDirResolver: _asrModelRootDir,
+        ),
+        wakePhrase: _wakePhrase,
+      );
+      await _liveController!.start();
+      _useStreaming = _liveController!.phase != LiveReadPhase.idle;
+
+      if (_useStreaming) {
+        // 流式路径：PCM 块直接推给流式引擎（不再每 800ms 重转写 7 秒）。
+        // ⚠️ 必须在 recorder.start() **之前**挂上 —— 否则开麦的头几块 PCM 会丢。
+        _recorder.onPcm = (pcm) => _liveController?.pushPcm(pcm);
+      }
+
+      await _recorder.start(
+        maxDurationMs: maxMsContinuous,
+        // 2026-10-20 读页重构 §四（不中断采集）：
+        // 整课一个流程 ⇒ 麦克风**一直开着**，静音不再结束录音；识别改走
+        // 滑动窗口（最近 8 秒），识别量恒定、延迟不同时长增长。
+        continuous: true,
+        windowBytes: _captureWindowBytes,
+      );
       _pulseController.repeat(reverse: true);
-      _startLive();
+      if (_useStreaming) {
+        _liveController!.addListener(_onLiveControllerChanged);
+        setState(() {
+          _statusHint = '请说「$_wakePhrase」开始朗读';
+        });
+      } else {
+        _startLive();
+      }
     } on ReadAlongMicPermissionDenied {
       setState(() {
         _isRecording = false;
@@ -474,6 +624,32 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
         _statusHint = '启动麦克风失败';
       });
     }
+  }
+
+  /// 流式控制器状态变化 ⇒ 刷新界面（口令提示、识别文本、逐字上色）。
+  void _onLiveControllerChanged() {
+    if (!mounted) return;
+    final c = _liveController;
+    if (c == null) return;
+    setState(() {
+      _liveSpoken = c.readingText.isNotEmpty ? c.readingText : c.liveText;
+      switch (c.phase) {
+        case LiveReadPhase.waitingWake:
+          _statusHint = '请说「$_wakePhrase」开始朗读';
+        case LiveReadPhase.reading:
+          _statusHint = '正在判读…';
+        case LiveReadPhase.idle:
+        case LiveReadPhase.sentenceDone:
+          _statusHint = '';
+      }
+    });
+  }
+
+  /// ASR 模型根目录（外置目录；App 启动后才推上去的模型也能找到）。
+  Future<String> _asrModelRootDir() async {
+    final dir = await getExternalStorageDirectory();
+    final sep = Platform.pathSeparator;
+    return '${dir!.path}$sep${'models'}$sep${'asr'}';
   }
 
   // --------------------------------------------------------- 边读边识别节拍器
@@ -770,19 +946,26 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
               child: Text('当前课文无句子', style: TextStyle(color: ll.textTertiary)),
             )
           : SafeArea(
-              child: Column(
+              child: Stack(
                 children: [
+                  Column(
+                    children: [
                   // 定位区：上一句 / 句序 / 下一句
                   _buildPositionRow(context, ll, controller, countLabel),
                   const SizedBox(height: 4),
 
+                  // ── 模式选择（2026-10-21）────────────────────────
+                  // 左：初读 / 熟读（切分粒度）
+                  // 右：逐句 / 全文（判定边界）
+                  _buildModeRow(context, ll),
+                  const SizedBox(height: 4),
                   // ── 整篇课文（2026-10-20 读页重构 · 整课骨架）────────
                   //
                   // 原来是一句一屏的"工作台"；现在是**整篇课文一次排开**，
                   // 随朗读位置自动滚动（孩子想往前翻也能翻）。
                   Expanded(
                     child: LessonReadingDocument(
-                      sentences: widget.sentences,
+                      sentences: _activeSentences,
                       tokens: _readingSession.tokens,
                       tokenStates: _readingSession.snapshot.tokenStates,
                       visibleToken: _readingSession.snapshot.visibleCursor,
@@ -806,21 +989,129 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
                     ),
                   ),
 
-                  // ── 底部实时识别栏：这一页唯一的"操作区" ──────────────
-                  // 不放下一句/完成/重读：整篇是一个流程，没有"下一步"。
-                  // 但**入口必须显眼**：整条底栏就是「开始读」那颗按钮
-                  // （郭老师：「没有开始读的按钮呀，怎么读」）。
+                  // ── 圆形录音按钮（2026-10-21）─────────────────────
+                  // 郭老师：「把开始识别和暂停识别浓缩为一个圆形的录音按钮，
+                  // 集合在底部中间的"听"和"读"上面」。
+                  //
+                  // 放在**课文区与识别回显栏之间**（不是悬浮）—— 悬浮会压住
+                  // 下面的文字（真机截图实证）。
+                  _buildRecordButton(ll),
+
+                  // ── 底部实时识别栏：只显示**识别文本回显** ────────────
+                  // 2026-10-21：主操作移到上面的圆形按钮，这条底栏不再
+                  // 当按钮用（只是孩子读的内容回显 + 提示）。
                   LiveReadingDock(
                     transcript: _liveSpoken,
                     listening: _isRecording,
                     hint: _statusHint.isNotEmpty
                         ? _statusHint
                         : _readingSession.snapshot.hint,
-                    onTap: _onStartRecording,
+                  ),
+                    ],
                   ),
                 ],
               ),
             ),
+    );
+  }
+
+  /// **模式选择行**（2026-10-21）。
+  ///
+  /// 左半：初读 / 熟读 —— 切分粒度（短句 vs 长意群）。
+  /// 右半：逐句 / 全文 —— 判定边界（一句一结算 vs 读完统一处理）。
+  ///
+  /// 两组都是小药丸，视觉权重刻意压低（不与圆形录音按钮争）。
+  Widget _buildModeRow(BuildContext context, LLPalette ll) {
+    return Row(
+      children: [
+        _segButton(
+          label: '初读',
+          selected: !_isAlternateMode,
+          onTap: _alternateSentences == null ? null : _toggleSegmentationMode,
+        ),
+        const SizedBox(width: 6),
+        _segButton(
+          label: '熟读',
+          selected: _isAlternateMode,
+          onTap: _alternateSentences == null ? null : _toggleSegmentationMode,
+        ),
+        const Spacer(),
+        _segButton(
+          label: '逐句',
+          selected: _readingMode == ReadingMode.sentence,
+          onTap: () => _setReadingMode(ReadingMode.sentence),
+        ),
+        const SizedBox(width: 6),
+        _segButton(
+          label: '全文',
+          selected: _readingMode == ReadingMode.fullText,
+          onTap: () => _setReadingMode(ReadingMode.fullText),
+        ),
+      ],
+    );
+  }
+
+  Widget _segButton({
+    required String label,
+    required bool selected,
+    required VoidCallback? onTap,
+  }) {
+    final ll = context.ll;
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected
+              ? ll.textPrimary.withValues(alpha: 0.10)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? ll.textPrimary.withValues(alpha: 0.22) : ll.divider,
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: enabled
+                ? (selected ? ll.textPrimary : ll.textSecondary)
+                : ll.disabled,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// **圆形录音按钮**（2026-10-21）。
+  ///
+  /// 一颗按钮管开始/暂停：
+  ///   · 待命 ⇒ 点一下开麦（进「等口令」）
+  ///   · 录音中 ⇒ 再点一下暂停
+  ///
+  /// 位置：课文区**下方**、识别回显栏**上方**（不是悬浮）—— 悬浮会压住
+  /// 下面的文字（真机截图实证）。这样它仍在 App 底部导航（听/读）**上面**。
+  Widget _buildRecordButton(LLPalette ll) {
+    final controller = _liveController;
+    final state = switch (controller?.phase) {
+      LiveReadPhase.waitingWake => LiveRecordButtonState.waitingWake,
+      LiveReadPhase.reading => LiveRecordButtonState.reading,
+      LiveReadPhase.sentenceDone => LiveRecordButtonState.reading,
+      _ => _isRecording
+          ? LiveRecordButtonState.waitingWake
+          : LiveRecordButtonState.idle,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Center(
+        child: LiveRecordButton(
+          state: state,
+          wakePhrase: _wakePhrase,
+          onTap: _onStartRecording,
+        ),
+      ),
     );
   }
 
