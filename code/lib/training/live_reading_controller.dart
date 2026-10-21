@@ -69,16 +69,6 @@ class LiveReadingController extends ChangeNotifier {
   String _readingText = '';
   String get readingText => _readingText;
 
-  /// 识别文本 → 音节（去调）。ASR 出的是汉字，这里按课文的音节表转。
-  ///
-  /// ⚠️ 中文 CTC/流式模型吐的是**汉字**（不是拼音），而对齐器比的是**音节**
-  /// （去调拼音）。所以要把识别到的汉字转成音节才能比。
-  ///
-  /// 做法：识别文本的每个字，用课文的 `char → toneless 音节` 表查（同一课里
-  /// 同一个字读音基本一致；多音字取课文里的那个读音 —— 这正是我们要的：
-  /// 孩子在照课文读）。
-  Map<String, String> _charToSyllable = {};
-
   /// 识别文本里**不在课文里**的字（无法转音节）—— 记下来做诊断。
   int _unknownChars = 0;
 
@@ -89,18 +79,9 @@ class LiveReadingController extends ChangeNotifier {
   ///   · 这一句读全绿 ⇒ **重置流式** ⇒ 之后吐的文本 = 纯下一句 ⇒ 不再 consume。
   bool _textHasWake = false;
 
-  /// 建立课文「字 → 音节」表。
-  void _buildCharMap() {
-    _charToSyllable = {};
-    for (final t in session.tokens) {
-      _charToSyllable.putIfAbsent(t.char, () => t.toneless);
-    }
-  }
-
   /// 开始实时朗读：开麦克风、等口令。
   Future<void> start() async {
     if (_phase != LiveReadPhase.idle) return;
-    _buildCharMap();
     try {
       _asr = await streamingEngine.openSession(language: 'zh');
     } catch (error) {
@@ -206,6 +187,19 @@ class LiveReadingController extends ChangeNotifier {
         _asr?.reset();
         _textHasWake = false;
         _readingText = '';
+        _liveText = '';
+        // 2026-10-21：判完一句 ⇒ **自动进下一句**（保持 reading）。
+        //
+        // ⚠️ 别做成「回到等口令」：口令是**一次启动信号**（用户原话：
+        //    「识别到开始朗读这个语音识别要常驻，听到我的口令之后它就自动
+        //    开始」⇒ 常驻的是**识别**本身，不是"每句都要说口令"）。
+        //    「常驻」体现在：进读页就自动开麦、麦克风与流式引擎一直开着，
+        //    不用每次点按钮；口令只负责把这一轮跟读启动起来。
+        //
+        // 口令检测器复位一下：万一这一轮里孩子又说了一次口令（比如要求
+        // 重来），下一句仍可被它接住。
+        _wake.reset();
+        _wakeHit = null;
       }
       notifyListeners();
     }
@@ -217,30 +211,33 @@ class LiveReadingController extends ChangeNotifier {
   bool _applyLive(String text) {
     if (text.isEmpty) return false;
     final syllables = <String>[];
+    final chars = <String>[];
     _unknownChars = 0;
 
     // 逐字取读音：
-    //   · 课文里有的字 ⇒ 用**课文里的读音**（孩子在照课文读，多音字也对得上）
-    //   · 课文里没有的字 ⇒ 用**拼音库给它的读音**（孩子读成了别的字）
-    //     ⚠️ 绝不能**丢掉**！丢了的话，对齐器那边就变成「那个字没读到」
-    //        （missed / pending），而不是「可能读成了 X」（substituted）——
-    //        孩子看不到自己读错成了什么。
+    //   · 用**识别文本自身**的上下文读音（`ChinesePinyin.format` 先查词组表
+    //     再回落单字表）—— **不再**用「课文里该字首次出现的读音」：
+    //     2026-10-21 真机 bug：课文里「长」先出现在别的上下文时，课文首现
+    //     读音会把整篇的「长」压成同一个音节 ⇒ 期望与识别两侧口径不一致。
+    //   · 课文外的声音**绝不丢掉**！丢了的话，对齐器那边就变成「那个字没读到」
+    //     （missed / pending），而不是「可能读成了 X」（substituted）——
+    //     孩子看不到自己读错成了什么。
+    //   · 同时把**汉字**传给对齐器：多音字靠「读音集合有交集」判定
+    //     （「长出」的「长」zhang vs ASR 吐的「常」chang ⇒ 算读对，不卡死）。
     for (final token in ChinesePinyin.format(text)) {
       if (!token.isChinese) continue; // 标点/空白不参与判定
-      final inText = _charToSyllable[token.char];
-      if (inText != null) {
-        syllables.add(inText);
-      } else {
+      final py = token.pinyin;
+      if (py == null || py.isEmpty) {
         _unknownChars++;
-        final py = token.pinyin;
-        if (py != null && py.isNotEmpty) {
-          syllables.add(ReadAlongSession.stripTones(py).toLowerCase());
-        }
+        continue;
       }
+      syllables.add(ReadAlongSession.stripTones(py).toLowerCase());
+      chars.add(token.char);
     }
     if (syllables.isEmpty) return false;
     return session.applyRecognition(
       syllables: syllables,
+      chars: chars,
       text: text,
       live: true,
     );

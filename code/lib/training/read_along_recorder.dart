@@ -103,15 +103,38 @@ class RecordMic implements ReadAlongMic {
           // 不告诉你真实值。请求 16k 会拿到 16k 头 + 48k 身的 PCM，
           // 声音被拉慢 3 倍，ASR 只能吐乱码。主动要 48k、自己抽取到 16k，
           // 采样率从此是确定的，不再赌设备。
+          //
+          // ⚠️ 2026-10-21：**"请求值"不等于"实际交付值"**（不同机型会给别的
+          //   采样率）⇒ 转换器参数必须对应实际采集的数据；见 [ReadAlongRecorder]
+          //   的诊断日志。
           encoder: AudioEncoder.pcm16bits,
           sampleRate: 48000,
           numChannels: 1,
-          bitRate: 16000,
-          // 真机调参（2026-10-11 小米14 实测）：孩子俯身对着放桌上的手机
-          // 读，原始电平偏弱——自动增益把轻声抬起来，噪声抑制压环境底噪。
-          autoGain: true,
-          noiseSuppress: true,
+          // ⚠️ 2026-10-21：删掉 `bitRate: 16000` —— PCM16 是**无压缩**采集，
+          //   这个值对采集毫无作用，却会被后来人误读成"音量/码率增益"。
+          //
+          // autoGain / noiseSuppress 全部**关掉**，音频源改 `unprocessed`：
+          //   · record 包自己的文档对这三个开关都写着
+          //     "Recording volume may be lowered by using this."（用了会**压低音量**）
+          //   · record_android 的实现是系统级音频效果
+          //     （`agc.enabled = config.autoGain` / `ns.enabled = …`），
+          //     Android 的 AGC 会把"够响"的帧压下去 ⇒ 孩子轻声/离远一点时
+          //     反而被压得更弱 —— 这正是"必须好大好大的声音"的最可能来源。
+          //   · `unprocessed`（API 24+）连硬件端的 AGC/NS/AEC 都不要，
+          //     我们自己用**固定增益 + 软限幅**控制（见 [PcmGain]），
+          //     增益恒定、不在句中跳变，比系统的双向 AGC 稳。
+          //   · 代价：环境底噪会一起进来 ⇒ 判读仍以「音节级对齐」为准，
+          //     底噪只会造成少量误识别，不会卡死整句。
+          autoGain: false,
+          noiseSuppress: false,
+          // 回授（页面自动播放课文 ⇒ 麦克风录进手机自己的声音）**不开 AEC**：
+          // Android 的 AEC 依赖扬声器参考信号与精确延迟对齐，Flutter 的
+          // 播放/录音异步管线对不齐，收敛不好时反而伤近端语音。
+          // 回授靠**半双工**（播放时不判读）解决。
           echoCancel: false,
+          androidConfig: AndroidRecordConfig(
+            audioSource: AndroidAudioSource.unprocessed,
+          ),
         ),
       );
 
@@ -142,6 +165,69 @@ double rmsOfPcm16(Uint8List bytes) {
     sum += sample * sample;
   }
   return math.sqrt(sum / count) / 32768;
+}
+
+/// PCM16 块的峰值（满量程 0~1）与削波比例（2026-10-21 诊断用）。
+///
+/// 削波比例 ＝ 幅度达到 0.99 以上的样本占比 ⇒ 能看出"是不是录太响削顶了"。
+({double peak, double clipped}) peakOfPcm16(Uint8List bytes) {
+  final count = bytes.length ~/ 2;
+  if (count == 0) return (peak: 0.0, clipped: 0.0);
+  var peak = 0.0;
+  var clipped = 0;
+  for (var i = 0; i < count; i++) {
+    final packed = bytes[i * 2] | (bytes[i * 2 + 1] << 8);
+    final sample = packed >= 32768 ? packed - 65536 : packed;
+    final a = sample.abs() / 32768.0;
+    if (a > peak) peak = a;
+    if (a >= 0.99) clipped++;
+  }
+  return (peak: peak, clipped: clipped / count);
+}
+
+/// **固定增益 + 软限幅**（2026-10-21）。
+///
+/// 放在 `PcmDecimator` 之后、送 wav/端点检测/ASR 之前 —— 三条线共用同一份
+/// 处理过的 PCM，不会出现"落盘的 wav 与送 ASR 的声音不一样"。
+///
+/// 软限幅用 tanh 的有理近似（|x|≤1 区间误差 < 0.01）：超过拐点后平滑压缩，
+/// 不会像硬截断那样产生谐波失真。
+class PcmGain {
+  PcmGain({this.gain = 1.0, this.softLimit = 0.92});
+
+  /// 增益倍数（1.0 = 不动）。
+  final double gain;
+
+  /// 软限幅拐点（满量程 1.0 的比例）。
+  final double softLimit;
+
+  bool get enabled => gain != 1.0;
+
+  /// 就地处理一块 PCM16（小端）。
+  void apply(Uint8List pcm) {
+    if (!enabled) return;
+    final limit = softLimit * 32767.0;
+    final count = pcm.lengthInBytes ~/ 2;
+    final view = ByteData.view(pcm.buffer, pcm.offsetInBytes, pcm.lengthInBytes);
+    for (var i = 0; i < count; i++) {
+      final s = view.getInt16(i * 2, Endian.little);
+      var y = s * gain;
+      // ⚠️ tanh 本身保号 ⇒ 只用一条分支；写成 `y = limit * tanh(y/limit)`
+      //    负信号也会被正确压回负数（曾写成 `-limit * tanh(...)` ⇒ 符号翻反）。
+      if (y > limit || y < -limit) {
+        y = limit * _tanh(y / limit);
+      }
+      if (y > 32767) y = 32767;
+      if (y < -32768) y = -32768;
+      view.setInt16(i * 2, y.round(), Endian.little);
+    }
+  }
+
+  /// tanh 的有理近似：x*(27+x²)/(27+9x²)，|x|≤1 时误差 < 0.01。
+  static double _tanh(double x) {
+    final x2 = x * x;
+    return x * (27 + x2) / (27 + 9 * x2);
+  }
 }
 
 /// 采样率抽取器（2026-10-13 真机根因修复）：设备交付 48k PCM，引擎只吃
@@ -407,10 +493,26 @@ class ReadAlongRecorder {
     this.silenceWindowMs = 1000,
     this.rmsThreshold = 0.008,
     this.inputSampleRate = 48000,
+    this.inputGain = 1.0,
     Future<Directory> Function()? tempDir,
     this.onPcm,
   })  : _mic = mic ?? RecordMic(),
-        _tempDir = tempDir ?? _defaultTempDir;
+        _tempDir = tempDir ?? _defaultTempDir,
+        _gain = PcmGain(gain: inputGain);
+
+  /// 固定增益 + 软限幅（见 [PcmGain]）。
+  final PcmGain _gain;
+
+  /// **输入增益**（固定倍数，2026-10-21）。
+  ///
+  /// 为什么需要它：系统的 AGC 是**双向**的（觉得"够响"就压）⇒ 孩子轻声、
+  /// 离远一点时反而被压弱 ⇒ 表现就是"必须好大好大的声音"。
+  /// 我们把 AGC 关掉（见 [RecordMic]），改用**固定增益 + 软限幅**：
+  /// 固定增益不会在句中跳变 ⇒ ASR 前端更稳；软限幅只处理近讲的峰值。
+  ///
+  /// ⚠️ 默认 **1.0（不动）**：增益不提高信噪比，放大了也会放大环境噪声。
+  ///   先用 [ReadAlongRecorder] 的诊断日志量出真实电平，再决定要不要调。
+  final double inputGain;
 
   /// **PCM 旁路**（2026-10-21 流式识别）：每收到一块 16kHz 单声道 PCM 就
   /// 回调一次。
@@ -517,19 +619,27 @@ class ReadAlongRecorder {
     // 48k 设备 PCM → 16k（低通+抽取）再进 wav/端点检测，下游只认 16k。
     var readDone = false;
     for (final pcm16 in _decimator?.push(chunk) ?? const <Uint8List>[]) {
+      // 固定增益 + 软限幅（2026-10-21）：系统的 AGC 已关（见 [RecordMic]），
+      // 电平改由我们自己控制 ⇒ 增益恒定、不会在句中跳变。
+      _gain.apply(pcm16);
       _wav.add(pcm16);
       _ring?.add(pcm16);
       // 流式识别的旁路（2026-10-21）：同一块 16k PCM 也直接推给流式引擎。
       // 放在这里 ⇒ 与端点检测、wav 落盘**完全解耦**，旧的离线链路不受影响。
       onPcm?.call(pcm16);
       if (tracker.feed(pcm16)) readDone = true;
+      _diagAccumulate(pcm16);
     }
     if (tracker.lastRms > 0 || readDone) {
       _events.add(RecorderLevel(tracker.lastRms));
     }
     if (readDone && !_continuous) {
       _finish(timedOut: false);
-    } else if (tracker.elapsedMs >= maxDurationMs) {
+    } else if (!_continuous && tracker.elapsedMs >= maxDurationMs) {
+      // 2026-10-21 修：连续模式（整课常驻收音）**不能**被单句录音的
+      // 时长兜底结束 —— 否则"麦克风一直开着"的设计会在 maxDurationMs
+      // 到点时静默断掉（而读页又把它当"到点重开"，于是麦克风断断续续）。
+      // 连续模式只由显式 stop() / 页面退出 / 应用生命周期结束。
       _finish(timedOut: true);
     }
   }
@@ -593,6 +703,41 @@ class ReadAlongRecorder {
     unawaited(_deleteLastWav());
     _events.add(RecorderFailed(error));
     _finishing = false;
+  }
+
+  /// 麦克风权限是否已 granted。
+  ///
+  /// 2026-10-21：读页要「进页就常驻监听口令」⇒ 自动开麦前先问权限，
+  /// 没权限就**不自动开**（免得每次进页都弹权限框），仍可点按钮手动开始。
+  Future<bool> hasPermission() => _mic.hasPermission();
+
+  /// 诊断：累计的块数 / RMS 平方和 / 峰值 / 削波样本数（2026-10-21）。
+  ///
+  /// 为什么要它：用户报「必须好大好大的声音、离远一点就不识别」——
+  /// **先量出真实电平**（RMS / 峰值 / 削波率），才知道是"麦克风没收到"
+  /// 还是"收到了但被压弱"还是"模型识别不了"。没有这些数字，调增益就是瞎调。
+  int _diagBlocks = 0;
+  double _diagSumSq = 0;
+  double _diagPeak = 0;
+  int _diagClipped = 0;
+
+  void _diagAccumulate(Uint8List pcm16) {
+    final rms = rmsOfPcm16(pcm16);
+    final peak = peakOfPcm16(pcm16);
+    _diagBlocks++;
+    _diagSumSq += rms * rms;
+    if (peak.peak > _diagPeak) _diagPeak = peak.peak;
+    _diagClipped += (peak.clipped * (pcm16.length ~/ 2)).round();
+    if (_diagBlocks % 50 == 0) {
+      final avgRms = math.sqrt(_diagSumSq / _diagBlocks);
+      // ignore: avoid_print
+      print('[ReadAlong][diag] blocks=$_diagBlocks '
+          'inRate=$inputSampleRate outRate=$sampleRate '
+          'gain=${_gain.gain} '
+          'rms=${avgRms.toStringAsFixed(4)} (${(20 * math.log(avgRms.clamp(1e-6, 1) / 0.1)).toStringAsFixed(1)}dBFS) '
+          'peak=${_diagPeak.toStringAsFixed(3)} '
+          'clipped=${(_diagClipped / (_diagBlocks * 256)).toStringAsFixed(4)}');
+    }
   }
 
   /// 上层主动中止（用户跳过这句等）：丢弃数据，不发事件。

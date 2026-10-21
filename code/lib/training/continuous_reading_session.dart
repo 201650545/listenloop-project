@@ -314,6 +314,7 @@ class ContinuousReadingSession extends ChangeNotifier {
     required List<String> syllables,
     required String text,
     bool live = false,
+    List<String>? chars,
   }) {
     if (_tokens.isEmpty) return false;
     _liveTranscript = text;
@@ -366,14 +367,33 @@ class ContinuousReadingSession extends ChangeNotifier {
     final expected = [
       for (var i = base; i < alignEnd; i++) _tokens[i].toneless,
     ];
+    // 期望侧的汉字（多音字容错要用）：与 expected 一一对应。
+    final expectedChars = [
+      for (var i = base; i < alignEnd; i++) _tokens[i].char,
+    ];
+    // 识别侧：音节 + 对应的汉字（_carry 里是上一轮多出来的，没有字 ⇒ 用空串
+    // 占位，判定时按"没有字"处理）。
     final heard = [
       ..._carry,
       for (final s in syllables)
         if (s.isNotEmpty) ReadAlongSession.stripTones(s).toLowerCase(),
     ];
+    final heardChars = <String>[
+      ...List<String>.filled(_carry.length, ''),
+      for (var k = 0; k < syllables.length; k++)
+        if (syllables[k].isNotEmpty)
+          (chars != null && k < chars.length) ? chars[k] : ''
+        else
+          '',
+    ];
     _carry = const [];
 
-    final result = _aligner.align(expected: expected, recognized: heard);
+    final result = _aligner.align(
+      expected: expected,
+      recognized: heard,
+      expectedChars: expectedChars,
+      recognizedChars: heardChars,
+    );
 
     // 写回状态：只动当前句（已确认的前缀不改 —— 红绿不闪）。
     var contiguous = base;

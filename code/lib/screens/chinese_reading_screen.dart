@@ -259,6 +259,13 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
     _recorder = widget.recorder ?? ReadAlongRecorder();
 
     _recorderSub = _recorder.events.listen(_onRecorderEvent);
+
+    // 2026-10-21：进读页就**常驻监听口令**（用户原话：「识别口令这个语音识别
+    // 要常驻，听到我的口令之后它就自动开始」）。
+    // 等一帧再开：initState 阶段还不能碰界面/插件。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoStartListening();
+    });
   }
 
   @override
@@ -548,13 +555,33 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
       return;
     }
 
+    await _startListening();
+  }
+
+  /// 进读页就**常驻监听口令**（2026-10-21 用户原话）。
+  ///
+  /// > 「是加一个识别口令，识别到开始朗读这个语音识别要常驻，听到我的口令
+  /// > 之后它就自动开始。」
+  ///
+  /// 麦克风权限还没拿到时**不自动开**（免得每次进页都弹权限框），
+  /// 仍可点圆形按钮手动开始。
+  Future<void> _autoStartListening() async {
+    if (!mounted || _isRecording || _liveController != null) return;
+    try {
+      if (!await _recorder.hasPermission()) return;
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    await _startListening();
+  }
+
+  /// 真正开始常驻监听（按钮手动开始 / 进页自动开始都走这里）。
+  Future<void> _startListening() async {
     if (widget.controller.isPlaying) {
       widget.controller.pause();
     }
 
-    final currentSentence = _currentSentence;
-    if (currentSentence != null) {
-      }
     _liveSpoken = '';
 
     // 2026-10-20 读页重构 §四：连续模式下不按"当前这一句"算上限 —— 整课一个
@@ -568,30 +595,29 @@ class _ChineseReadingScreenState extends State<ChineseReadingScreen>
     });
 
     try {
-      await _recorder.start(
-        maxDurationMs: maxMsContinuous,
-        // 2026-10-20 读页重构 §四（不中断采集）：
-        // 整课一个流程 ⇒ 麦克风**一直开着**，静音不再结束录音；识别改走
-        // 滑动窗口（最近 8 秒），识别量恒定、延迟不随时长增长。
-        continuous: true,
-        windowBytes: _captureWindowBytes,
-      );
       // 2026-10-21：**首选流式识别**（边说边出字 + 口令触发）。
       // 没有流式模型（或打开失败）⇒ 降级到旧的滑动窗口离线转写。
-      _liveController = LiveReadingController(
+      //
+      // ⚠️ 顺序很重要（2026-10-21 评审意见）：**先开 ASR 会话，再挂 onPcm，
+      //   最后才开麦** ——
+      //   ① ASR 没开成就不该开麦（否则麦克风白转、还一直占着权限）；
+      //   ② onPcm 必须在 recorder.start() 之前挂上，否则开麦的头几块 PCM 会丢
+      //      （原代码把 onPcm 挂在 start 之后，而它自己的注释写的是"必须在之前"）。
+      final live = LiveReadingController(
         session: _readingSession,
         streamingEngine: SherpaOnnxStreamingAsrEngine(
           modelDirResolver: _asrModelRootDir,
         ),
         wakePhrase: _wakePhrase,
       );
-      await _liveController!.start();
-      _useStreaming = _liveController!.phase != LiveReadPhase.idle;
-
+      await live.start();
+      _useStreaming = live.phase != LiveReadPhase.idle;
       if (_useStreaming) {
+        _liveController = live;
         // 流式路径：PCM 块直接推给流式引擎（不再每 800ms 重转写 7 秒）。
-        // ⚠️ 必须在 recorder.start() **之前**挂上 —— 否则开麦的头几块 PCM 会丢。
         _recorder.onPcm = (pcm) => _liveController?.pushPcm(pcm);
+      } else {
+        live.dispose();
       }
 
       await _recorder.start(

@@ -115,41 +115,101 @@ class WakePhraseDetector {
   /// 累积文本里「已触发过的那一段」的结束位置（用于切掉）。
   int _consumedUpTo = 0;
 
+  /// 待确认的命中**文本**（**稳定性确认**用）。
+  ///
+  /// 2026-10-21 评审意见：流式识别的中间结果是**会变的**（ASR 会修正前面的
+  /// 字）⇒ 只凭一次命中就触发，会被临时的错字骗到。
+  /// ⇒ 要求**连续两次**识别更新都命中、且**匹配到的文本一致**，才算真触发。
+  ///
+  /// ⚠️ 比的是**文本**不是位置：ASR 把「开始使读」修正成「开便朗读」时，
+  ///   两者的结束位置相同、但内容不同 ⇒ 只比位置会漏掉这种修正。
+  String? _pendingWindow;
+
+  /// 连续命中同一段文本的次数。
+  int _pendingCount = 0;
+
   /// 检查一段累积文本。
   ///
   /// [text] 是流式识别的**累积**结果（越往后越长）。
+  ///
+  /// 返回 [WakeMatch.none] 表示"还没确定"（可能是没命中，也可能是命中了但
+  /// 还没通过稳定性确认）—— 对调用方来说两者的处理方式相同：再等等。
   WakeMatch check(String text) {
     if (_fired) return WakeMatch.none;
     final norm = normalizeForWakeMatch(text);
-    if (norm.isEmpty || _normalized.isEmpty) return WakeMatch.none;
+    if (norm.isEmpty || _normalized.isEmpty) {
+      _pendingWindow = null;
+      _pendingCount = 0;
+      return WakeMatch.none;
+    }
 
     // 严格包含。
     final idx = norm.indexOf(_normalized);
     if (idx >= 0) {
+      // 严格命中（字字相同）**立即触发**：误触发风险很低，
+      // 而流式识别每 300~500ms 才来一次更新，等第二次会平白多半天延迟。
       _fired = true;
       _consumedUpTo = idx + _normalized.length;
+      _pendingWindow = null;
+      _pendingCount = 0;
       return WakeMatch.exact;
     }
+
     // 宽松：允许一处同音字替换。
-    if (_looseHit(norm)) {
-      _fired = true;
-      _consumedUpTo = norm.length;
-      return WakeMatch.loose;
+    //
+    // ⚠️ 2026-10-21 修：原来宽松命中把 `_consumedUpTo` 设成 **norm.length**
+    //    ⇒ consume() 会把**口令后面的正文一起切掉**（孩子连着说
+    //    「开始朗读池塘里」时，"池塘里"被吃掉）。现在返回**真实匹配窗口的
+    //    结束位置**，只切口令那一段。
+    //
+    //    宽松命中**要连续两次位置一致**才触发：它允许一处同音字替换 ⇒
+    //    「开始首读」这种半错的话也会命中 ⇒ 误触发风险明显高于严格匹配。
+    //    而流式识别的中间结果**会变**（ASR 会修正前面的字）⇒ 只凭一次
+    //    命中就触发，容易被临时的错字骗到。
+    final hit = _looseHit(norm);
+    if (hit == null) {
+      _pendingWindow = null;
+      _pendingCount = 0;
+      return WakeMatch.none;
     }
-    return WakeMatch.none;
+    final window = norm.substring(hit.$1, hit.$2);
+    if (_pendingWindow == window) {
+      _pendingCount++;
+    } else {
+      _pendingWindow = window;
+      _pendingCount = 1;
+    }
+    if (_pendingCount < 2) {
+      return WakeMatch.none; // 第一次只记候选，等下一次识别更新确认
+    }
+    _fired = true;
+    _consumedUpTo = hit.$2;
+    return WakeMatch.loose;
   }
 
-  /// 宽松匹配：把口令的每个字换成一个同音候选后看能否包含。
-  bool _looseHit(String norm) {
+  /// 宽松匹配：口令的某个字被换成一个同音字时，返回匹配窗口的 (start, end)。
+  ///
+  /// 窗口在归一化文本上滑动；恰好一处同音替换才算命中。
+  (int, int)? _looseHit(String norm) {
     final chars = _normalized.split('');
-    // 口令很短（≤6 字）时，枚举 1 处替换是可行的。
-    for (var i = 0; i < chars.length; i++) {
-      for (final alt in _alternativesFor(chars[i])) {
-        final candidate = chars.toList()..[i] = alt;
-        if (norm.contains(candidate.join())) return true;
+    final n = chars.length;
+    if (n == 0 || norm.length < n) return null;
+    for (var start = 0; start + n <= norm.length; start++) {
+      var diffs = 0;
+      var ok = true;
+      for (var k = 0; k < n; k++) {
+        final c = norm[start + k];
+        if (c == chars[k]) continue;
+        if (_alternativesFor(chars[k]).contains(c)) {
+          diffs++;
+          continue;
+        }
+        ok = false;
+        break;
       }
+      if (ok && diffs == 1) return (start, start + n);
     }
-    return false;
+    return null;
   }
 
   /// 某个字的同音候选。
@@ -177,9 +237,11 @@ class WakePhraseDetector {
     return norm.substring(_consumedUpTo);
   }
 
-  /// 清空（换一次测试 / 复位）。
+  /// 清空（换一次测试 / 复位 / 判完一句回到"等口令"）。
   void reset() {
     _fired = false;
     _consumedUpTo = 0;
+    _pendingWindow = null;
+    _pendingCount = 0;
   }
 }

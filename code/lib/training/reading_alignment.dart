@@ -14,13 +14,22 @@
 ///
 /// 做法是**音节级序列对齐**（Needleman–Wunsch 变体）：
 /// 　· 期望序列 = 课文的音节（去调），识别序列 = ASR 的音节（去调）；
-/// 　· 打分：完全相同 3 分；同声母 1.5 分（读音接近，倾向判"可能读成"）；
-///    其它 0.75 分（读到了别的音）；跳过（漏/多）各扣 1.2 分；
+/// 　· 打分：完全相同 3 分；**多音字变体（读音集合有交集）2.5 分**；
+///    同声母 0.25 分（读音接近，判"可能读成"）；**其它给负分**
+///    （不给正奖励，免得 DP 把不相干的音硬配上）；跳过（漏/多）各扣 1.2 分；
 /// 　· 回溯得到每个课文音节的状态：匹配 / 可能读成 / 漏读。
+///
+/// 2026-10-21（真机 bug「长出两条后腿」的「长」识别不了）：
+/// 　判定原本把「字」当成「唯一的音节」——多音字只要换了个读音就被判成读错
+/// 　⇒ 红字 ⇒ 游标不推进 ⇒ **整句卡死**（孩子读对了也说读错）。
+/// 　⇒ 现在配对会带上**汉字**，「长」(zhang/chang) 与「常」(chang) 的读音
+/// 　集合有交集 ⇒ 判「读对」。配套数据：`chinese_polyphone_map.dart`。
 ///
 /// 关键性质：**漏读只影响那一个**。回溯时"漏掉的那一格"与"多出来的那一格"
 /// 若声母相同，就把"漏读"升级为"可能读成 X"（把听到的音记下来给孩子看）。
 library;
+
+import '../utils/chinese_polyphone_map.dart';
 
 /// 一个课文音节的判定结果。
 enum ReadingTokenStatus {
@@ -104,18 +113,42 @@ class ReadingAlignment {
 class ReadingAligner {
   const ReadingAligner();
 
+  /// 音节完全相同（同音字、同一个字的同一读音）⇒ 读对了。
   static const double _matchScore = 3.0;
-  static const double _sameInitialScore = 1.5;
-  static const double _otherScore = 0.75;
+
+  /// **多音字变体**：期望字与识别字**读音集合有交集**（如「长出」的「长」
+  /// = zhang，ASR 吐成「常」= chang —— 两者都是「长/常」这一族的合法读音）。
+  ///
+  /// 2026-10-21 真机 bug：孩子读「长出两条后腿」读得完全正确，App 却把
+  /// 「长」判成红字 ⇒ 游标不推进 ⇒ **整句卡死**。根因就是判定把「字」
+  /// 当成了「唯一的音节」——多音字只要换了个读音就被当成读错。
+  static const double _variantScore = 2.5;
+
+  /// 同声母（读音接近）⇒ 判「可能读成了 X」（红字，但不阻塞游标）。
+  static const double _sameInitialScore = 0.25;
+
+  /// 完全不匹配。**不给正分**（2026-10-21 评审意见）：给了正分，DP 会
+  /// 倾向于「把不相干的音硬配上」而不是标成漏读 ⇒ 污染对齐路径。
+  /// 取值须大于 `-_gapPenalty`，这样仍会配对（孩子能看到"读成了 X"），
+  /// 只是不再被当成"对齐得好"。
+  static const double _mismatchScore = -0.8;
+
   static const double _gapPenalty = 1.2;
 
   /// 把 [recognized] 对齐到 [expected]。
   ///
   /// [expected] 与 [recognized] 都是**去调**音节（比较时用去调版；声母比较
   /// 也在去调版上做）。返回的 [ReadingAlignment.statuses] 与 [expected] 等长。
+  ///
+  /// [expectedChars] / [recognizedChars] 是**可选**的汉字序列（与音节一一
+  /// 对应）。给了它们，多音字才能被正确容忍：判定会看「期望字的全部合法
+  /// 读音」与「识别字的全部合法读音」**有没有交集**（见 [_pairScore]）。
+  /// 不给就退化成纯音节比较（老行为，供纯音节场景与老测试使用）。
   ReadingAlignment align({
     required List<String> expected,
     required List<String> recognized,
+    List<String>? expectedChars,
+    List<String>? recognizedChars,
   }) {
     final n = expected.length;
     final m = recognized.length;
@@ -158,8 +191,13 @@ class ReadingAligner {
     }
     for (var i = 1; i <= n; i++) {
       for (var j = 1; j <= m; j++) {
-        final diag =
-            dp[i - 1][j - 1] + _pairScore(expected[i - 1], recognized[j - 1]);
+        final diag = dp[i - 1][j - 1] +
+            _pairScore(
+              expected[i - 1],
+              recognized[j - 1],
+              expectedChar: _charAt(expectedChars, i - 1),
+              recognizedChar: _charAt(recognizedChars, j - 1),
+            );
         final up = dp[i - 1][j] - _gapPenalty; // 期望多一个 → 漏读
         final left = dp[i][j - 1] - _gapPenalty; // 识别多一个 → 多读/插入
         dp[i][j] = _max3(diag, up, left);
@@ -181,12 +219,17 @@ class ReadingAligner {
     var frontier = n;
     while (i > 0 || j > 0) {
       if (i > 0 && j > 0) {
-        final diag = dp[i - 1][j - 1] +
-            _pairScore(expected[i - 1], recognized[j - 1]);
+        final score = _pairScore(
+          expected[i - 1],
+          recognized[j - 1],
+          expectedChar: _charAt(expectedChars, i - 1),
+          recognizedChar: _charAt(recognizedChars, j - 1),
+        );
+        final diag = dp[i - 1][j - 1] + score;
         if ((dp[i][j] - diag).abs() < 1e-9) {
-          final e = expected[i - 1];
           final r = recognized[j - 1];
-          if (e == r) {
+          if (score >= _variantScore) {
+            // 音节相同 / 同一个字 / 多音字合法变体 ⇒ 读对了。
             statuses[i - 1] = ReadingTokenStatus.matched;
             heard[i - 1] = r;
           } else {
@@ -263,10 +306,56 @@ class ReadingAligner {
   static double _max3(double a, double b, double c) =>
       a > b ? (a > c ? a : c) : (b > c ? b : c);
 
-  static double _pairScore(String expected, String recognized) {
+  static String? _charAt(List<String>? chars, int index) {
+    if (chars == null) return null;
+    if (index < 0 || index >= chars.length) return null;
+    return chars[index];
+  }
+
+  /// 一对（期望音节, 识别音节）的配对分。
+  ///
+  /// 判定顺序（2026-10-21 评审后重排）：
+  ///  1. 音节相同 ⇒ 3.0（读对了）
+  ///  2. 同一个汉字 ⇒ 3.0（ASR 吐对了字，读音不用猜）
+  ///  3. **读音集合有交集** ⇒ 2.5（多音字变体：「长出」的「长」zhang 与
+  ///     ASR 吐的「常」chang 都是合法读音 ⇒ 算读对，不该判红卡死）
+  ///  4. 同声母 ⇒ 0.25（读音接近 ⇒ 「可能读成了 X」）
+  ///  5. 其余 ⇒ 负分（不给正奖励，DP 不会被"硬配"带偏）
+  static double _pairScore(
+    String expected,
+    String recognized, {
+    String? expectedChar,
+    String? recognizedChar,
+  }) {
     if (expected == recognized) return _matchScore;
+    if (expectedChar != null && expectedChar == recognizedChar) {
+      return _matchScore;
+    }
+    if (expectedChar != null && recognizedChar != null) {
+      final expectedReadings = _readingsOf(expectedChar, expected);
+      final recognizedReadings = _readingsOf(recognizedChar, recognized);
+      var shares = false;
+      for (final reading in expectedReadings) {
+        if (recognizedReadings.contains(reading)) {
+          shares = true;
+          break;
+        }
+      }
+      if (shares) return _variantScore;
+    }
     if (_sameInitial(expected, recognized)) return _sameInitialScore;
-    return _otherScore;
+    return _mismatchScore;
+  }
+
+  /// 某个字的全部合法读音（去调）：它的上下文读音 + 它作为多音字时的其它读音。
+  ///
+  /// 数据源：`chinese_polyphone_map.dart`（由 pypinyin 的 heteronym 离线生成，
+  /// 只收**去调后读音确实不同**的多音字 —— 「为/只/发」这类去调后同音的
+  /// 不必进表，音节级判定天然就能容忍）。
+  static Set<String> _readingsOf(String char, String syllable) {
+    final alt = kPolyphoneReadings[char];
+    if (alt == null || alt.isEmpty) return {syllable};
+    return {syllable, ...alt};
   }
 
   /// 声母是否相同（"找" vs "爪" 算接近，"找" vs "猫" 不算）。
