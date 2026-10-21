@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/sentence.dart';
 import '../utils/chinese_pinyin.dart';
 import '../utils/chinese_polyphone_map.dart';
+import 'filler_words.dart';
 import 'chinese_word_segmenter.dart';
 import 'read_along_session.dart';
 import 'reading_alignment.dart';
@@ -36,6 +37,7 @@ class ReadingToken {
     required this.pinyin,
     required this.toneless,
     required this.wordKey,
+    this.isFiller = false,
   });
 
   /// 全篇序号（0 起）。
@@ -57,6 +59,13 @@ class ReadingToken {
 
   /// 所属词组的键（跨句唯一）。
   final String wordKey;
+
+  /// 是不是**语气词 / 拟声词**（读漏了不算读错）。
+  ///
+  /// 2026-10-21 真机 bug：课文「小蝌蚪游哇游」的「哇」被流式 ASR **整个吞掉**
+  /// ⇒ 逐音节严格对齐 ⇒ 中间那位判 missed ⇒ 红字 ⇒ 游标卡住 ⇒ 整句走不完。
+  /// ⇒ 语气词位漏读**不判红、不阻塞游标**（见 [filler_words.dart]）。
+  final bool isFiller;
 }
 
 /// 整课朗读的**不可变快照** —— 页面只订阅这个，不碰内部状态。
@@ -257,6 +266,7 @@ class ContinuousReadingSession extends ChangeNotifier {
           pinyin: py,
           toneless: ReadAlongSession.stripTones(py).toLowerCase(),
           wordKey: '${s}#${tokenToWord[t] ?? t}',
+          isFiller: isFillerChar(pt.char),
         ));
       }
     }
@@ -428,31 +438,43 @@ class ContinuousReadingSession extends ChangeNotifier {
 
     // 写回状态：只动当前句（已确认的前缀不改 —— 红绿不闪）。
     var contiguous = base;
+    // **实词位**的统计（语气词/拟声词不算数）—— 用于「整句全绿」判定。
+    var solidTotal = 0;
+    var solidMatched = 0;
+    var solidSubstituted = 0;
     for (var k = 0; k < result.statuses.length; k++) {
       final idx = base + k;
       if (idx >= _tokens.length) break;
       var status = result.statuses[k];
-
-      // ⚠️ 流式（live）：尾部那些**还没读到**的字不能判「漏读」。
-      //
-      // 批式识别是「读完一句再判」，尾部判 missed 是对的（真的漏了）。
-      // 流式下只识别到句中，尾部只是**还没读**——判 missed 会让满屏红字。
-      // ⇒ 用对齐器的 frontier（识别覆盖到的位置）把尾部还原成 pending。
       if (live && k >= result.frontier) {
         status = ReadingTokenStatus.pending;
       }
-
+      final isFiller = _tokens[idx].isFiller;
+      if (!isFiller) {
+        solidTotal++;
+        if (status == ReadingTokenStatus.matched) {
+          solidMatched++;
+        } else if (status == ReadingTokenStatus.substituted) {
+          solidSubstituted++;
+        }
+      }
       if (idx < _committedCursor) continue;
+      if (isFiller &&
+          (status == ReadingTokenStatus.missed ||
+              status == ReadingTokenStatus.substituted)) {
+        // 语气词/拟声词：ASR 常把它**整个吞掉**（短、无语义、声学弱）
+        // ⇒ 真机实测「小蝌蚪游哇游」被识别成「小蝌蚪游游」。
+        // ⇒ 这里**不判红**（保持中性），也不阻塞游标。
+        status = ReadingTokenStatus.pending;
+      }
       _tokenStates[idx] = status;
       if (status != ReadingTokenStatus.pending) {
         _tokenHeard[idx] = result.heard[k];
       }
-      // ⚠️ 只有**完全对上**（matched）才推进游标。
-      //
-      // substituted = 读成了别的字 ⇒ 游标**停在这儿**（那个字标红，等重读），
-      // 不能推过去 —— 推过去就等于「读错了也往下走」，正是郭老师说的
-      // 「这一句还没读准，它就一直跳」。
-      if (status == ReadingTokenStatus.matched && idx == contiguous) {
+      // 游标推进：实词位要 matched 才推进；**语气词位无论对错都跨过**
+      // ⇒ 孩子漏了一个语气词，整句照样能走完（不该卡在这一句）。
+      if (idx == contiguous &&
+          (status == ReadingTokenStatus.matched || isFiller)) {
         contiguous = idx + 1;
       }
     }
@@ -481,9 +503,11 @@ class ContinuousReadingSession extends ChangeNotifier {
     //   · 换句                ⇒ 必须整句 matched 且无一字 substituted。
     final bool sentenceMode = _mode == ReadingMode.sentence;
     final int sentenceLen = sentenceEnd - base;
-    final bool allGreen = sentenceLen > 0 &&
-        result.matchedCount >= sentenceLen &&
-        result.substitutedCount == 0;
+    // 「整句全绿」：**实词位**全对、且没有真读错。
+    // 语气词/拟声词读没读都不算（它们常被 ASR 整个吞掉）⇒ 不计入。
+    final bool allGreen = solidTotal > 0 &&
+        solidMatched == solidTotal &&
+        solidSubstituted == 0;
 
     if (sentenceMode && live) {
       // 句内位置照旧推进（逐字高亮要）。
